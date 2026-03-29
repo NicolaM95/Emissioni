@@ -6,13 +6,14 @@ from datetime import datetime
 # --- CONFIGURAZIONE ---
 st.set_page_config(page_title="Emissioni Pro v3.5 - FULL", layout="wide")
 
-# CSS per Interfaccia
+# CSS per Interfaccia e Validazione
 st.markdown("""
     <style>
     .main-header { font-size: 26px; font-weight: bold; color: #1E3A8A; }
     .result-card { background-color: #f0f7ff; padding: 20px; border-radius: 15px; border: 1px solid #007bff; margin-bottom: 20px; }
     .metric-value { font-size: 20px; font-weight: bold; color: #1E3A8A; }
     .camp-container { border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; background-color: white; margin-bottom: 15px; }
+    .stDataFrame div[data-testid="stTable"] { width: 100%; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -58,72 +59,77 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
 
 # ==========================================
-# 2. DINAMICA FUMI
+# 2. DINAMICA FUMI (CORRETTA)
 # ==========================================
 elif st.session_state.page == 'fumi':
-    st.header("📐 Dinamica dei Fumi (Calcoli ISO 16911)")
+    st.header("📐 Dinamica dei Fumi (ISO 16911)")
     c1, c2 = st.columns([1, 2])
     
     with c1:
         d_cam = st.number_input("Diametro Camino (m)", value=1.4, format="%.3f")
-        # Logica Punti Automatica
-        if d_cam <= 0.35: n_default = 1
-        elif d_cam <= 1.1: n_default = 4
-        elif d_cam <= 1.5: n_default = 8
-        else: n_default = 12
-        
-        n_punti_fumi = st.number_input("Punti di misura Delta P", value=n_default)
+        n_punti_fumi = st.number_input("Punti di misura Delta P", value=8)
         t_fumi = st.number_input("T. Fumi (°C)", value=259.0)
         k_pit = st.number_input("K Pitot", value=0.69)
         p_atm = st.number_input("P. Atm (hPa)", value=1013.25)
         p_stat = st.number_input("P. Statica (Pa)", value=-10.0)
-        o2_mis = st.number_input("O2 misurata (%)", value=14.71)
+        o2_mis = st.number_input("O2 misurata (%)", value=14.71, step=0.1)
         h_in = st.number_input("Umidità (%)", value=4.68)
         o2_rif = st.number_input("O2 riferimento (%)", value=8.0)
 
     with c2:
         st.subheader("Inserimento Mappatura ΔP")
-        df_dp = pd.DataFrame({"Punto": [f"P{i+1}" for i in range(n_punti_fumi)], "ΔP (Pa)": [26.6]*n_punti_fumi})
+        df_dp = pd.DataFrame({"Punto": [f"P{i+1}" for i in range(int(n_punti_fumi))], "ΔP (Pa)": [26.6]*int(n_punti_fumi)})
         edit_dp = st.data_editor(df_dp, hide_index=True, use_container_width=True)
         
         dp_med = edit_dp["ΔP (Pa)"].mean()
         p_ass = p_atm + (p_stat/100)
         
-        # Motore di Calcolo Fisico
-        rho_fumi = 0.621 # kg/m3 (Dato utente fisso per coerenza con calcoli precedenti)
-        v_fumi = np.sqrt((2 * dp_med * k_pit) / rho_fumi)
+        # Calcolo Densità Reale (Metodo Scientifico)
+        rho_std = 1.293 
+        rho_fumi = rho_std * (p_ass / 1013.25) * (273.15 / (t_fumi + 273.15))
+        
+        v_fumi = k_pit * np.sqrt((2 * dp_med) / rho_fumi) if rho_fumi > 0 else 0
         area = (np.pi * d_cam**2) / 4
         
         q_aq = v_fumi * area * 3600
         q_un_u = q_aq * (273.15/(t_fumi+273.15)) * (p_ass/1013.25)
         q_un_s = q_un_u * (1 - h_in/100)
-        q_rif = q_un_s * ((20.9 - o2_mis)/(20.9 - o2_rif))
+        
+        # LOGICA O2 - Correzione Ossicombustione
+        if o2_mis >= 20.8:
+            q_rif = q_un_s
+            info_o2 = "O2 >= 20.8%: Processo in aria/ossicombustione. Portata Riferita = Portata Secca."
+        else:
+            f_corr = (20.9 - o2_mis) / (20.9 - o2_rif)
+            q_rif = q_un_s * f_corr
+            info_o2 = f"Fattore O2 calcolato: {f_corr:.3f}"
 
         st.markdown("<div class='result-card'>", unsafe_allow_html=True)
+        st.write(f"ℹ️ {info_o2}")
         r1, r2 = st.columns(2)
-        r1.markdown(f"**Velocità:** {v_fumi:.2f} m/s<br>**Portata Tal Quale:** {q_aq:.0f} Am³/h<br>**Portata N. Umida:** {q_un_u:.0f} Nm³/h", unsafe_allow_html=True)
+        r1.markdown(f"**Velocità:** {v_fumi:.2f} m/s<br>**Portata Tal Quale:** {q_aq:.0f} Am³/h", unsafe_allow_html=True)
         r2.markdown(f"**Portata N. Secca:** {q_un_s:.0f} Nm³/h<br><span style='color:green; font-size:20px;'><b>PORTATA RIFERITA: {q_rif:.0f} Nm³/h</b></span>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
         
         if st.button("💾 Salva Dinamica"):
-            st.session_state.dati_dinamica = {'v': v_fumi, 'q_rif': q_rif, 'p_ass': p_ass, 'h_in': h_in, 't_fumi': t_fumi}
-            st.success("Dati dinamica archiviati correttamente.")
+            st.session_state.dati_dinamica = {'v': v_fumi, 'q_rif': q_rif, 'p_ass': p_ass, 'h_in': h_in, 't_fumi': t_fumi, 'o2_mis': o2_mis}
+            st.success("Dati dinamica archiviati.")
 
 # ==========================================
-# 3. CAMPIONAMENTI
+# 3. CAMPIONAMENTI (CON VALIDAZIONE)
 # ==========================================
 elif st.session_state.page == 'camp':
     if st.session_state.camp_attivo is None:
         st.header("💉 Gestione Campionamenti")
         if st.button("➕ AGGIUNGI CAMPIONAMENTO", use_container_width=True):
-            st.session_state.lista_c.append({'id': len(st.session_state.lista_c)+1, 'main': [], 'sep': [], 'punti': 4})
+            st.session_state.lista_c.append({'id': len(st.session_state.lista_c)+1, 'main': [], 'sep': [], 'punti': 4, 'dati': None})
             st.rerun()
         
         for i, c in enumerate(st.session_state.lista_c):
             with st.container():
                 st.markdown(f"<div class='camp-container'>", unsafe_allow_html=True)
                 ca1, ca2, ca3 = st.columns([4, 1, 1])
-                ca1.write(f"### 📦 Campionamento n° {c['id']}")
+                ca1.write(f"### 📦 Campionamento n° {c['id']} - ({', '.join(c['main'] + c['sep'])})")
                 if ca2.button("📊 APRI", key=f"open_{i}"):
                     st.session_state.camp_attivo = i
                     st.session_state.step_camp = 'selezione'; st.rerun()
@@ -138,7 +144,7 @@ elif st.session_state.page == 'camp':
         if st.session_state.step_camp == 'selezione':
             st.subheader(f"⚙️ Selezione Parametri - Campionamento {curr['id']}")
             
-            st.write("#### 🟦 LINEA ISOCINETICA (Unica)")
+            st.write("#### 🟦 LINEA ISOCINETICA (es. Polveri, Metalli...)")
             m_cols = st.columns(4)
             for j, p in enumerate(PARAMETRI_BASE):
                 with m_cols[j % 4]:
@@ -147,7 +153,7 @@ elif st.session_state.page == 'camp':
                     else:
                         if p in curr['main']: curr['main'].remove(p)
             
-            st.write("#### 🟧 LINEE SEPARATE / DERIVATE")
+            st.write("#### 🟧 LINEE SEPARATE / DERIVATE (es. COV, Aldeidi...)")
             s_cols = st.columns(4)
             for j, p in enumerate(PARAMETRI_BASE):
                 with s_cols[j % 4]:
@@ -161,38 +167,65 @@ elif st.session_state.page == 'camp':
 
         elif st.session_state.step_camp == 'tabella':
             st.subheader(f"📊 Dati Campo - Camp. {curr['id']}")
-            if st.button("⬅️ MODIFICA SELEZIONE"): st.session_state.step_camp = 'selezione'; st.rerun()
+            if st.button("⬅️ TORNA A SELEZIONE"): st.session_state.step_camp = 'selezione'; st.rerun()
 
-            # Umidità
-            st.write("### 💧 Umidità specifica")
-            u_sel = st.selectbox("Parametro per Umidità:", ["Dinamica"] + curr['main'] + curr['sep'])
-            if u_sel != "Dinamica":
-                if "Polveri" in u_sel:
-                    u1, u2 = st.columns(2)
-                    m1_i = u1.number_input("Serp. Iniziale (g)", 0.0); m1_f = u1.number_input("Serp. Finale (g)", 0.0)
-                    m2_i = u2.number_input("Gel Iniziale (g)", 0.0); m2_f = u2.number_input("Gel Finale (g)", 0.0)
-                else:
-                    u1, u2 = st.columns(2)
-                    mi = u1.number_input("Gorg. Iniziali (g)", 0.0); mf = u2.number_input("Gorg. Finali (g)", 0.0)
-
-            # Tabella
-            st.write("### 📝 Tabella di Marcia")
+            # Costruzione Colonne Dinamiche
             cols = ["Punto", "ΔP (Pa)", "T Fumi (°C)"]
-            if curr['main']: cols += ["Vol. Main (L)", "T. Main (°C)"]
-            for s in curr['sep']: cols += [f"Vol. {s} (L)", f"T. {s} (°C)"]
+            if curr['main']:
+                label_main = " + ".join(curr['main'])
+                cols += [f"Vol. {label_main} (L)", f"T. {label_main} (°C)"]
+            for s in curr['sep']:
+                cols += [f"Vol. {s} (L)", f"T. {s} (°C)"]
             cols += ["Isocinetismo %"]
+
+            # Generazione DataFrame
+            if curr.get('dati') is None or len(curr['dati']) != curr['punti']:
+                df_init = pd.DataFrame(0.0, index=range(curr['punti']), columns=cols)
+                df_init["Punto"] = [f"P{k+1}" for k in range(curr['punti'])]
+                df_init["Isocinetismo %"] = 100.0
+                curr['dati'] = df_init
+
+            # Tabella di marcia con evidenziazione automatica
+            st.write("### 📝 Tabella di Marcia")
             
-            df_c = pd.DataFrame([{c: 0.0 for c in cols} for _ in range(curr['punti'])])
-            df_c["Punto"] = [f"P{k+1}" for k in range(curr['punti'])]
-            st.data_editor(df_c, use_container_width=True, hide_index=True)
+            # Funzione di stile per validazione
+            def style_isocinetismo(val):
+                color = 'lightgreen' if 95 <= val <= 115 else 'salmon'
+                return f'background-color: {color}'
+
+            # Editor
+            edited_df = st.data_editor(curr['dati'], use_container_width=True, hide_index=True, key=f"edit_{idx}")
+            
+            # Validazione Visiva Riassuntiva
+            iso_medio = edited_df["Isocinetismo %"].mean()
+            if 95 <= iso_medio <= 115:
+                st.success(f"✅ Isocinetismo Medio conforme: {iso_medio:.1f}%")
+            else:
+                st.error(f"⚠️ Isocinetismo Medio NON conforme: {iso_medio:.1f}% (Range ammesso 95-115%)")
+
+            if st.button("💾 SALVA DEFINITIVAMENTE CAMPIONAMENTO"):
+                st.session_state.lista_c[idx]['dati'] = edited_df
+                st.balloons()
+                st.session_state.camp_attivo = None
+                st.rerun()
 
 # ==========================================
 # 4. HOME & RDP
 # ==========================================
 elif st.session_state.page == 'home':
     st.markdown("<p class='main-header'>🏭 Emissioni Pro v3.5</p>", unsafe_allow_html=True)
-    st.write("Benvenuto nel sistema completo.")
+    st.write("Software professionale per la gestione dei flussi di emissione e campionamenti isocinetici.")
+    st.info("Usa il menu a sinistra per iniziare l'inserimento dati.")
+
 elif st.session_state.page == 'rdp':
-    st.header("📄 Rapporto di Prova")
-    st.write(f"Ditta: {st.session_state.dati_anagrafica.get('ditta')}")
-    st.write(f"Tecnici: {', '.join(st.session_state.dati_anagrafica.get('tecnici', []))}")
+    st.header("📄 Riepilogo per Rapporto di Prova")
+    st.write(f"**Ditta:** {st.session_state.dati_anagrafica.get('ditta', 'N.D.')}")
+    st.write(f"**Camino:** {st.session_state.dati_anagrafica.get('camino', 'N.D.')}")
+    if st.session_state.dati_dinamica:
+        st.write(f"**Portata Riferita:** {st.session_state.dati_dinamica['q_rif']:.0f} Nm³/h")
+    
+    st.write("---")
+    st.write("### Stato Campionamenti")
+    for c in st.session_state.lista_c:
+        status = "✅ Salvato" if c['dati'] is not None else "⏳ In corso"
+        st.write(f"Campionamento {c['id']}: {status}")
