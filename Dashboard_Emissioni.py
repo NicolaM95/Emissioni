@@ -57,6 +57,7 @@ if st.session_state.page == 'anagrafica':
         if st.form_submit_button("💾 Salva Dati"):
             st.session_state.dati_anagrafica['tecnici'] = tecnici_str.split("\n")
             st.success("Dati Generali e Team salvati!")
+
 # ==========================================
 # 2. DINAMICA FUMI (RIGHE DINAMICHE DA EXCEL)
 # ==========================================
