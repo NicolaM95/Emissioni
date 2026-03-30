@@ -62,7 +62,7 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
 
 # ==========================================
-# 2. DINAMICA FUMI (VERSIONE AGGIORNATA)
+# 2. DINAMICA FUMI (VERSIONE AUTOMATIZZATA)
 # ==========================================
 elif st.session_state.page == 'fumi':
     st.header("📐 Dinamica dei Fumi (Mappatura Excel ISO 16911)")
@@ -72,9 +72,21 @@ elif st.session_state.page == 'fumi':
     with c1:
         st.subheader("Parametri Condotto")
         d_cam = st.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
-        n_punti_default = st.number_input("Punti per ogni Asse (X, Y)", value=d['n_punti'], min_value=1, max_value=10)
         
-        # K Pitot posizionato sotto i punti come richiesto
+        # --- LOGICA AUTOMATICA PUNTI IN BASE AL DIAMETRO ---
+        # Riproduciamo la logica del tuo Excel:
+        if d_cam < 0.35:
+            n_punti_auto = 1
+        elif d_cam <= 1.1:
+            n_punti_auto = 4
+        elif d_cam <= 1.6:
+            n_punti_auto = 8
+        else:
+            n_punti_auto = 10 # O il valore massimo previsto dal tuo file
+            
+        # Visualizziamo il numero di punti calcolato (sola lettura per l'utente o modificabile)
+        n_punti_fumi = st.number_input("Punti per ogni Asse (Auto-calcolato)", value=n_punti_auto, min_value=1, max_value=10)
+        
         k_pit = st.number_input("K Pitot", value=d['k_pit'])
         
         st.write("---")
@@ -86,7 +98,6 @@ elif st.session_state.page == 'fumi':
         p_atm = st.number_input("P. Atmosferica (hPa)", value=d['p_atm'])
         p_stat_pa = st.number_input("P. Statica nel camino (Pa)", value=d['p_stat_pa'])
         
-        # Calcolo Pressione Assoluta (P.atm + P.stat/100)
         p_ass_hpa = p_atm + (p_stat_pa / 100)
         st.metric("Pressione Assoluta", f"{p_ass_hpa:.2f} hPa")
 
@@ -98,33 +109,32 @@ elif st.session_state.page == 'fumi':
     with c2:
         st.subheader(f"Mappatura ΔP ({unit_dp})")
         
-        # --- LOGICA AFFONDAMENTI DA EXCEL ---
-        # Coefficienti estratti dal tuo file (A3-A12)
+        # --- LOGICA AFFONDAMENTI ---
         coeff_excel = [0.032, 0.105, 0.194, 0.323, 0.500, 0.677, 0.806, 0.895, 0.968]
-        # Calcoliamo gli affondamenti in base al diametro e al numero di righe richiesto
-        affondamenti = [round(d_cam * coeff_excel[i], 3) for i in range(min(int(n_punti_default), len(coeff_excel)))]
+        # Calcolo affondamenti limitato dal numero di punti calcolato sopra
+        affondamenti = [round(d_cam * coeff_excel[i], 3) for i in range(min(int(n_punti_fumi), len(coeff_excel)))]
         
+        # Sostituzione Asse X -> Asse 1 e Asse Y -> Asse 2
         df_mappa = pd.DataFrame({
             "Punto": [f"P{i+1}" for i in range(len(affondamenti))],
             "Affondamento (m)": affondamenti,
-            f"ΔP Asse X ({unit_dp})": [26.6 if unit_dp=="Pa" else 2.7] * len(affondamenti),
-            f"ΔP Asse Y ({unit_dp})": [26.6 if unit_dp=="Pa" else 2.7] * len(affondamenti)
+            f"ΔP Asse 1 ({unit_dp})": [26.6 if unit_dp=="Pa" else 2.7] * len(affondamenti),
+            f"ΔP Asse 2 ({unit_dp})": [26.6 if unit_dp=="Pa" else 2.7] * len(affondamenti)
         })
 
-        # La key dinamica resetta la tabella se cambia diametro o numero punti
+        # La key include n_punti_fumi per aggiornarsi appena cambia il diametro
         edit_mappa = st.data_editor(
             df_mappa, 
             hide_index=True, 
             use_container_width=True, 
-            key=f"map_{d_cam}_{n_punti_default}_{unit_dp}"
+            key=f"map_{d_cam}_{n_punti_fumi}_{unit_dp}"
         )
         
         # --- MOTORE DI CALCOLO ---
-        col_x = f"ΔP Asse X ({unit_dp})"
-        col_y = f"ΔP Asse Y ({unit_dp})"
-        dp_medio_input = pd.concat([edit_mappa[col_x], edit_mappa[col_y]]).mean()
+        col_1 = f"ΔP Asse 1 ({unit_dp})"
+        col_2 = f"ΔP Asse 2 ({unit_dp})"
+        dp_medio_input = pd.concat([edit_mappa[col_1], edit_mappa[col_2]]).mean()
 
-        # Conversioni
         dp_pa = dp_medio_input * 9.80665 if unit_dp == "mmH2O" else dp_medio_input
         dp_visual_mmH2O = dp_medio_input if unit_dp == "mmH2O" else dp_medio_input / 9.80665
 
@@ -133,7 +143,6 @@ elif st.session_state.page == 'fumi':
         area = (np.pi * d_cam**2) / 4
         q_aq = v_fumi * area * 3600
         
-        # Calcolo Portata Secca (Usa h_in definita sopra)
         q_un_u = q_aq * (273.15/(t_fumi+273.15)) * (p_ass_hpa/1013.25)
         q_un_s = q_un_u * (1 - h_in/100)
         
@@ -152,9 +161,9 @@ elif st.session_state.page == 'fumi':
             st.session_state.dati_dinamica.update({
                 'h_in': h_in, 't_fumi': t_fumi, 'p_atm': p_atm, 'p_stat_pa': p_stat_pa,
                 'o2_mis': o2_mis, 'o2_rif': o2_rif, 'd_cam': d_cam, 'k_pit': k_pit,
-                'q_rif': q_rif, 'v': v_fumi, 'n_punti': n_punti_default, 'p_ass': p_ass_hpa
+                'q_rif': q_rif, 'v': v_fumi, 'n_punti': n_punti_fumi, 'p_ass': p_ass_hpa
             })
-            st.success("Dati dinamica archiviati correttamente.")
+            st.success("Dati dinamica archiviati con successo.")
 
 # ==========================================
 # 3. CAMPIONAMENTI
