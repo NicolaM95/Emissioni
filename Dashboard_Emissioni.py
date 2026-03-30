@@ -62,7 +62,7 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
 
 # ==========================================
-# 2. DINAMICA FUMI (VERSIONE LOGICA EXCEL)
+# 2. DINAMICA FUMI (LOGICA EXCEL FINO A 10 PUNTI)
 # ==========================================
 elif st.session_state.page == 'fumi':
     st.header("📐 Dinamica dei Fumi (Mappatura ISO 16911)")
@@ -73,7 +73,7 @@ elif st.session_state.page == 'fumi':
         st.subheader("Parametri Condotto")
         d_cam = st.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
         
-        # --- LOGICA AUTOMATICA PUNTI/COEFFICIENTI ---
+        # --- LOGICA COMPLETA FINO A 10 PUNTI (Basata su Diametro) ---
         if d_cam < 0.35:
             n_punti_fumi = 1
             coeffs = [0.500]
@@ -83,11 +83,16 @@ elif st.session_state.page == 'fumi':
         elif d_cam <= 1.6:
             n_punti_fumi = 4
             coeffs = [0.067, 0.250, 0.750, 0.933]
+        elif d_cam <= 2.4:
+            n_punti_fumi = 8
+            coeffs = [0.032, 0.105, 0.194, 0.323, 0.677, 0.806, 0.895, 0.968]
         else:
-            n_punti_fumi = 6
-            coeffs = [0.044, 0.146, 0.296, 0.704, 0.854, 0.956]
+            # Configurazione massima: 10 punti per asse
+            n_punti_fumi = 10
+            coeffs = [0.026, 0.082, 0.146, 0.226, 0.342, 0.658, 0.774, 0.854, 0.918, 0.974]
             
-        st.info(f"Configurazione: {n_punti_fumi} punti per asse")
+        st.info(f"Configurazione: {n_punti_fumi} punti per asse ({n_punti_fumi*2} totali)")
+        
         k_pit = st.number_input("K Pitot", value=d['k_pit'])
         
         st.write("---")
@@ -121,37 +126,31 @@ elif st.session_state.page == 'fumi':
             df_mappa, 
             hide_index=True, 
             use_container_width=True, 
-            key=f"map_dyn_{d_cam}_{unit_dp}"
+            key=f"map_dyn_{d_cam}_{unit_dp}_{n_punti_fumi}" # Aggiunta n_punti alla chiave per reset sicuro
         )
         
         # --- MOTORE DI CALCOLO ---
         col_1 = f"ΔP Asse 1 ({unit_dp})"
         col_2 = f"ΔP Asse 2 ({unit_dp})"
+        
+        # Concateniamo i valori e rimuoviamo eventuali zeri se vuoi una media solo sui punti inseriti
+        # ma di norma si fa la media su tutti i punti previsti dalla griglia
         dp_medio_raw = pd.concat([edit_mappa[col_1], edit_mappa[col_2]]).mean()
         dp_pa = dp_medio_raw * 9.80665 if unit_dp == "mmH2O" else dp_medio_raw
         
-        # 1. Densità e Velocità
         rho_fumi = 1.293 * (p_ass_hpa / 1013.25) * (273.15 / (t_fumi + 273.15))
         v_fumi = k_pit * np.sqrt((2 * dp_pa) / rho_fumi) if rho_fumi > 0 else 0
         area = (np.pi * d_cam**2) / 4
         
-        # 2. Portata Tal Quale (A.Q. - Am³/h)
         q_aq = v_fumi * area * 3600
-        
-        # 3. Portata Normale Umida (Nm³/h umidi)
         q_un_u = q_aq * (273.15 / (t_fumi + 273.15)) * (p_ass_hpa / 1013.25)
-        
-        # 4. Portata Normale Secca (Nm³/h secchi)
         q_un_s = q_un_u * (1 - h_in/100)
         
-        # 5. Portata Riferita (Nm³/h rif. O2)
         f_corr = (20.9 - o2_mis) / (20.9 - o2_rif) if o2_mis < 20.8 else 1.0
         q_rif = q_un_s * f_corr
 
-        # --- VISUALIZZAZIONE RISULTATI ---
         st.markdown("<div class='result-card'>", unsafe_allow_html=True)
         st.write(f"**Velocità Media:** {v_fumi:.2f} m/s")
-        
         res_c1, res_c2 = st.columns(2)
         with res_c1:
             st.write(f"**Portata Tal Quale:** {q_aq:.0f} Am³/h")
@@ -167,7 +166,7 @@ elif st.session_state.page == 'fumi':
                 'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis, 
                 'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi
             })
-            st.success("Tutte le portate sono state archiviate!")
+            st.success(f"Dati salvati con griglia a {n_punti_fumi} punti!")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
