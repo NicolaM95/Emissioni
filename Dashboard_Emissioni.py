@@ -57,7 +57,6 @@ if st.session_state.page == 'anagrafica':
         if st.form_submit_button("💾 Salva Dati"):
             st.session_state.dati_anagrafica['tecnici'] = tecnici_str.split("\n")
             st.success("Dati Generali e Team salvati!")
-
 # ==========================================
 # 2. DINAMICA FUMI (RIGHE DINAMICHE DA EXCEL)
 # ==========================================
@@ -153,6 +152,7 @@ elif st.session_state.page == 'fumi':
                 'tabella': edit_mappa.to_dict()
             }
             st.success(f"Mappatura a {len(affondamenti_reali)} punti salvata!")
+
 # ==========================================
 # 3. CAMPIONAMENTI (CON VALIDAZIONE)
 # ==========================================
