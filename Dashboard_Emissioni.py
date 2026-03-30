@@ -73,8 +73,7 @@ elif st.session_state.page == 'fumi':
         st.subheader("Parametri Condotto")
         d_cam = st.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
         
-        # --- LOGICA FORMULE COLONNA B (Basata su Diametro A1) ---
-        # Determiniamo il numero di punti e i coefficienti in base al diametro
+        # --- LOGICA AUTOMATICA PUNTI/COEFFICIENTI ---
         if d_cam < 0.35:
             n_punti_fumi = 1
             coeffs = [0.500]
@@ -85,12 +84,10 @@ elif st.session_state.page == 'fumi':
             n_punti_fumi = 4
             coeffs = [0.067, 0.250, 0.750, 0.933]
         else:
-            # Per diametri > 1.6m (solitamente 6 o 8 punti per asse)
             n_punti_fumi = 6
             coeffs = [0.044, 0.146, 0.296, 0.704, 0.854, 0.956]
             
-        st.info(f"Configurazione automatica: {n_punti_fumi} punti per asse")
-        
+        st.info(f"Configurazione: {n_punti_fumi} punti per asse")
         k_pit = st.number_input("K Pitot", value=d['k_pit'])
         
         st.write("---")
@@ -111,12 +108,8 @@ elif st.session_state.page == 'fumi':
 
     with c2:
         st.subheader(f"Mappatura ΔP ({unit_dp})")
-        
-        # --- CALCOLO AFFONDAMENTI (Colonna A del tuo Excel) ---
-        # Formula: Diametro * Coefficiente
         affondamenti = [round(d_cam * c, 3) for c in coeffs]
         
-        # Creazione DataFrame con Asse 1 e Asse 2
         df_mappa = pd.DataFrame({
             "Punto": [f"P{i+1}" for i in range(len(affondamenti))],
             "Affondamento (m)": affondamenti,
@@ -124,51 +117,57 @@ elif st.session_state.page == 'fumi':
             f"ΔP Asse 2 ({unit_dp})": [0.0] * len(affondamenti)
         })
 
-        # L'editor si aggiorna (aggiunge/toglie righe) al variare del diametro
         edit_mappa = st.data_editor(
             df_mappa, 
             hide_index=True, 
             use_container_width=True, 
-            key=f"map_dyn_{d_cam}_{unit_dp}" # Key dinamica per forzare il refresh
+            key=f"map_dyn_{d_cam}_{unit_dp}"
         )
         
-        # --- CALCOLI FINALI ---
+        # --- MOTORE DI CALCOLO ---
         col_1 = f"ΔP Asse 1 ({unit_dp})"
         col_2 = f"ΔP Asse 2 ({unit_dp})"
-        
-        # Media di tutti i valori inseriti nelle due colonne
         dp_medio_raw = pd.concat([edit_mappa[col_1], edit_mappa[col_2]]).mean()
-
-        # Conversione in Pa per il calcolo della velocità
         dp_pa = dp_medio_raw * 9.80665 if unit_dp == "mmH2O" else dp_medio_raw
         
-        # Calcolo Rho (densità reale fumi)
+        # 1. Densità e Velocità
         rho_fumi = 1.293 * (p_ass_hpa / 1013.25) * (273.15 / (t_fumi + 273.15))
-        
-        # Velocità e Portate
         v_fumi = k_pit * np.sqrt((2 * dp_pa) / rho_fumi) if rho_fumi > 0 else 0
         area = (np.pi * d_cam**2) / 4
-        q_aq = v_fumi * area * 3600
-        q_un_s = (q_aq * (273.15/(t_fumi+273.15)) * (p_ass_hpa/1013.25)) * (1 - h_in/100)
         
+        # 2. Portata Tal Quale (A.Q. - Am³/h)
+        q_aq = v_fumi * area * 3600
+        
+        # 3. Portata Normale Umida (Nm³/h umidi)
+        q_un_u = q_aq * (273.15 / (t_fumi + 273.15)) * (p_ass_hpa / 1013.25)
+        
+        # 4. Portata Normale Secca (Nm³/h secchi)
+        q_un_s = q_un_u * (1 - h_in/100)
+        
+        # 5. Portata Riferita (Nm³/h rif. O2)
         f_corr = (20.9 - o2_mis) / (20.9 - o2_rif) if o2_mis < 20.8 else 1.0
         q_rif = q_un_s * f_corr
 
-        st.markdown(f"""
-            <div class="result-card">
-                <b>Punti calcolati:</b> {len(affondamenti)} per asse | <b>Velocità:</b> {v_fumi:.2f} m/s<br>
-                <b>Portata Normale Secca:</b> {q_un_s:.0f} Nm³/h<br>
-                <span style="color:green; font-size:20px;"><b>PORTATA RIFERITA: {q_rif:.0f} Nm³/h</b></span>
-            </div>
-        """, unsafe_allow_html=True)
+        # --- VISUALIZZAZIONE RISULTATI ---
+        st.markdown("<div class='result-card'>", unsafe_allow_html=True)
+        st.write(f"**Velocità Media:** {v_fumi:.2f} m/s")
+        
+        res_c1, res_c2 = st.columns(2)
+        with res_c1:
+            st.write(f"**Portata Tal Quale:** {q_aq:.0f} Am³/h")
+            st.write(f"**Portata N. Umida:** {q_un_u:.0f} Nm³/h")
+        with res_c2:
+            st.write(f"**Portata N. Secca:** {q_un_s:.0f} Nm³/h")
+            st.markdown(f"<span style='color:green; font-size:20px;'><b>PORTATA RIFERITA: {q_rif:.0f} Nm³/h</b></span>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        if st.button("💾 Salva Dati"):
+        if st.button("💾 Salva Dati Dinamica"):
             st.session_state.dati_dinamica.update({
-                'h_in': h_in, 't_fumi': t_fumi, 'p_atm': p_atm, 'p_stat_pa': p_stat_pa,
-                'o2_mis': o2_mis, 'o2_rif': o2_rif, 'd_cam': d_cam, 'k_pit': k_pit,
-                'q_rif': q_rif, 'v': v_fumi, 'n_punti': n_punti_fumi
+                'v': v_fumi, 'q_aq': q_aq, 'q_un_u': q_un_u, 'q_un_s': q_un_s, 'q_rif': q_rif,
+                'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis, 
+                'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi
             })
-            st.success("Dati aggiornati e salvati!")
+            st.success("Tutte le portate sono state archiviate!")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
