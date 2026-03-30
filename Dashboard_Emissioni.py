@@ -59,7 +59,7 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
 
 # ==========================================
-# 2. DINAMICA FUMI (mmH2O / Pa & 2 ASSI)
+# 2. DINAMICA FUMI (mmH2O / Pa & PRESSIONE ASSOLUTA hPa)
 # ==========================================
 elif st.session_state.page == 'fumi':
     st.header("📐 Dinamica dei Fumi e Mappatura Pressioni")
@@ -71,17 +71,24 @@ elif st.session_state.page == 'fumi':
         n_punti_asse = st.number_input("Punti per ogni Asse (X, Y)", value=4, min_value=1)
         
         st.write("---")
-        # Scelta Unità di Misura per la Tabella
+        # Scelta Unità di Misura per la Tabella DeltaP
         unit_dp = st.radio("Unità di misura per ΔP in tabella:", ["mmH2O", "Pa"], horizontal=True)
         
         st.write("---")
+        st.subheader("Pressioni e Temperature")
         t_fumi = st.number_input("T. Fumi (°C)", value=259.0)
-        k_pit = st.number_input("K Pitot", value=0.69)
-        p_atm = st.number_input("P. Atm (hPa)", value=1013.25)
-        p_stat_pa = st.number_input("P. Statica (Pa)", value=-10.0)
+        p_atm = st.number_input("P. Atmosferica (hPa)", value=1013.25, help="Pressione barometrica del sito")
+        p_stat_pa = st.number_input("P. Statica nel camino (Pa)", value=-10.0, help="Pressione relativa interna")
+        
+        # CALCOLO PRESSIONE ASSOLUTA IN hPa
+        # P_ass = P_atm + (P_stat / 100) -> Trasformiamo i Pascal della statica in hPa
         p_ass_hpa = p_atm + (p_stat_pa / 100)
         
+        st.metric("Pressione Assoluta (P.ass)", f"{p_ass_hpa:.2f} hPa", 
+                  help="Calcolata come P.atm + (P.stat / 100)")
+        
         st.write("---")
+        k_pit = st.number_input("K Pitot", value=0.69)
         o2_mis = st.number_input("O2 misurata (%)", value=14.71)
         h_in = st.number_input("Umidità (%)", value=4.68)
         o2_rif = st.number_input("O2 riferimento (%)", value=8.0)
@@ -89,14 +96,14 @@ elif st.session_state.page == 'fumi':
     with c2:
         st.subheader(f"Mappatura ΔP ({unit_dp})")
         
-        # Calcolo Affondamenti (UNI EN 15259)
+        # Calcolo Affondamenti (Distanza dalla parete interna)
         posizioni = []
         for i in range(1, int(n_punti_asse) + 1):
+            # Formula semplificata per punti centrali di corone circolari di uguale area
             pos = (2 * i - 1) / (2 * n_punti_asse)
             posizioni.append(round(pos * d_cam, 3))
 
-        # Creazione DataFrame con Colonne A, B, D (come richiesto, C ed E eliminate)
-        # B = Asse 1, D = Asse 2
+        # Creazione DataFrame con Colonne: Punto, Affondamento, DeltaP X, DeltaP Y
         df_mappa = pd.DataFrame({
             "Punto": [f"P{i+1}" for i in range(int(n_punti_asse))],
             "Affondamento (m)": posizioni,
@@ -106,15 +113,15 @@ elif st.session_state.page == 'fumi':
 
         edit_mappa = st.data_editor(df_mappa, hide_index=True, use_container_width=True)
         
-        # --- LOGICA DI CONVERSIONE E CALCOLO ---
+        # --- MOTORE DI CALCOLO FISICO ---
         col_x = f"ΔP Asse X ({unit_dp})"
         col_y = f"ΔP Asse Y ({unit_dp})"
         
-        # Uniamo i valori per la media
+        # Media aritmetica dei valori inseriti (X + Y)
         valori_dp = pd.concat([edit_mappa[col_x], edit_mappa[col_y]])
         dp_medio_input = valori_dp.mean()
 
-        # Conversione in Pascal per le formule fisiche se l'input è mmH2O
+        # Conversione tecnica per formule di velocità (Sempre in Pascal)
         if unit_dp == "mmH2O":
             dp_pa = dp_medio_input * 9.80665
             dp_visual_mmH2O = dp_medio_input
@@ -122,22 +129,27 @@ elif st.session_state.page == 'fumi':
             dp_pa = dp_medio_input
             dp_visual_mmH2O = dp_medio_input / 9.80665
 
-        # Calcolo Velocità e Portate
+        # Calcolo Densità Fumi Reale (kg/m3)
         rho_std = 1.293 
         rho_fumi = rho_std * (p_ass_hpa / 1013.25) * (273.15 / (t_fumi + 273.15))
+        
+        # Formula Velocità: v = K * sqrt( (2 * DeltaP) / Rho )
         v_fumi = k_pit * np.sqrt((2 * dp_pa) / rho_fumi) if rho_fumi > 0 else 0
         area = (np.pi * d_cam**2) / 4
         
+        # Portate
         q_aq = v_fumi * area * 3600
         q_un_s = (q_aq * (273.15/(t_fumi+273.15)) * (p_ass_hpa/1013.25)) * (1 - h_in/100)
         
-        # Correzione O2
+        # Correzione O2 (Ossicombustione se O2 > 20.8)
         f_corr = (20.9 - o2_mis) / (20.9 - o2_rif) if o2_mis < 20.8 else 1.0
         q_rif = q_un_s * f_corr
 
-        # --- RISULTATI ---
+        # --- BOX RISULTATI ---
         st.markdown("<div class='result-card'>", unsafe_allow_html=True)
-        st.markdown(f"**ΔP Medio calcolato:** {dp_visual_mmH2O:.3f} mmH2O ({dp_pa:.2f} Pa)")
+        st.write(f"**Pressione Assoluta calcolata:** {p_ass_hpa:.2f} hPa")
+        st.write(f"**ΔP Medio:** {dp_visual_mmH2O:.3f} mmH2O")
+        
         r1, r2 = st.columns(2)
         r1.markdown(f"**Velocità:** {v_fumi:.2f} m/s<br>**Portata A.Q.:** {q_aq:.0f} Am³/h", unsafe_allow_html=True)
         r2.markdown(f"**Portata N. Secca:** {q_un_s:.0f} Nm³/h<br><span style='color:green; font-size:20px;'><b>RIFERITA: {q_rif:.0f} Nm³/h</b></span>", unsafe_allow_html=True)
@@ -145,13 +157,13 @@ elif st.session_state.page == 'fumi':
         
         if st.button("💾 Salva Dati Dinamica"):
             st.session_state.dati_dinamica = {
+                'p_ass_hpa': p_ass_hpa,
                 'v': v_fumi, 
                 'q_rif': q_rif, 
-                'dp_mmH2O': dp_visual_mmH2O, # Salviamo il valore in mmH2O per il RdP
-                'unit_usata': unit_dp,
+                'dp_mmH2O': dp_visual_mmH2O,
                 'tabella': edit_mappa.to_dict()
             }
-            st.success("Dati archiviati con successo per il Rapporto di Prova.")
+            st.success("Configurazione dinamica salvata correttamente.")
 # ==========================================
 # 3. CAMPIONAMENTI (CON VALIDAZIONE)
 # ==========================================
