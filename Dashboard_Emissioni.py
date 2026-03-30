@@ -62,7 +62,7 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
 
 # ==========================================
-# 2. DINAMICA FUMI (LOGICA EXCEL FINO A 10 PUNTI)
+# 2. DINAMICA FUMI (LOGICA EXCEL - SOGLIE CORRETTE)
 # ==========================================
 elif st.session_state.page == 'fumi':
     st.header("📐 Dinamica dei Fumi (Mappatura ISO 16911)")
@@ -73,25 +73,27 @@ elif st.session_state.page == 'fumi':
         st.subheader("Parametri Condotto")
         d_cam = st.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
         
-        # --- LOGICA COMPLETA FINO A 10 PUNTI (Basata su Diametro) ---
+        # --- LOGICA SOGLIE EXCEL AGGIORNATA ---
         if d_cam < 0.35:
             n_punti_fumi = 1
             coeffs = [0.500]
-        elif d_cam <= 1.1:
+        elif d_cam < 0.70:
             n_punti_fumi = 2
             coeffs = [0.146, 0.854]
-        elif d_cam <= 1.6:
+        elif d_cam < 1.20:
             n_punti_fumi = 4
             coeffs = [0.067, 0.250, 0.750, 0.933]
-        elif d_cam <= 2.4:
+        elif d_cam <= 1.60: # Qui ora 1.60m rientra correttamente nei 6 punti
+            n_punti_fumi = 6
+            coeffs = [0.044, 0.146, 0.296, 0.704, 0.854, 0.956]
+        elif d_cam <= 2.40:
             n_punti_fumi = 8
             coeffs = [0.032, 0.105, 0.194, 0.323, 0.677, 0.806, 0.895, 0.968]
         else:
-            # Configurazione massima: 10 punti per asse
             n_punti_fumi = 10
             coeffs = [0.026, 0.082, 0.146, 0.226, 0.342, 0.658, 0.774, 0.854, 0.918, 0.974]
             
-        st.info(f"Configurazione: {n_punti_fumi} punti per asse ({n_punti_fumi*2} totali)")
+        st.info(f"Configurazione: {n_punti_fumi} punti per asse")
         
         k_pit = st.number_input("K Pitot", value=d['k_pit'])
         
@@ -113,6 +115,7 @@ elif st.session_state.page == 'fumi':
 
     with c2:
         st.subheader(f"Mappatura ΔP ({unit_dp})")
+        # Calcolo affondamenti reali
         affondamenti = [round(d_cam * c, 3) for c in coeffs]
         
         df_mappa = pd.DataFrame({
@@ -122,19 +125,18 @@ elif st.session_state.page == 'fumi':
             f"ΔP Asse 2 ({unit_dp})": [0.0] * len(affondamenti)
         })
 
+        # La key include n_punti_fumi per resettare la tabella quando cambia la soglia
         edit_mappa = st.data_editor(
             df_mappa, 
             hide_index=True, 
             use_container_width=True, 
-            key=f"map_dyn_{d_cam}_{unit_dp}_{n_punti_fumi}" # Aggiunta n_punti alla chiave per reset sicuro
+            key=f"map_dyn_{d_cam}_{unit_dp}_{n_punti_fumi}" 
         )
         
         # --- MOTORE DI CALCOLO ---
         col_1 = f"ΔP Asse 1 ({unit_dp})"
         col_2 = f"ΔP Asse 2 ({unit_dp})"
         
-        # Concateniamo i valori e rimuoviamo eventuali zeri se vuoi una media solo sui punti inseriti
-        # ma di norma si fa la media su tutti i punti previsti dalla griglia
         dp_medio_raw = pd.concat([edit_mappa[col_1], edit_mappa[col_2]]).mean()
         dp_pa = dp_medio_raw * 9.80665 if unit_dp == "mmH2O" else dp_medio_raw
         
@@ -166,7 +168,7 @@ elif st.session_state.page == 'fumi':
                 'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis, 
                 'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi
             })
-            st.success(f"Dati salvati con griglia a {n_punti_fumi} punti!")
+            st.success(f"Dati salvati con successo!")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
