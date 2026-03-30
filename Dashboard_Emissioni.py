@@ -59,90 +59,100 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
 
 # ==========================================
-# 2. DINAMICA FUMI (LOGICA EXCEL AFFONDAMENTI)
+# 2. DINAMICA FUMI (RIGHE DINAMICHE DA EXCEL)
 # ==========================================
 elif st.session_state.page == 'fumi':
-    st.header("📐 Dinamica dei Fumi e Mappatura Pressioni")
+    st.header("📐 Dinamica dei Fumi - Mappatura Excel")
     c1, c2 = st.columns([1, 2])
     
     with c1:
         st.subheader("Parametri Condotto")
+        # Diametro (Cella A1 del tuo Excel)
         d_cam = st.number_input("Diametro Camino (m)", value=1.4, format="%.3f")
-        n_punti_asse = st.number_input("Punti per ogni Asse (X, Y)", value=4, min_value=1, max_value=10)
         
-        # K Pitot posizionato sotto i punti come richiesto
+        # Coefficienti estratti dal tuo file Excel (A3-A12)
+        # Questi coefficienti moltiplicati per il diametro danno l'affondamento
+        coeff_excel = [0.032, 0.105, 0.194, 0.323, 0.500, 0.677, 0.806, 0.895, 0.968]
+        
+        # Calcoliamo quanti punti sono validi (nel tuo excel se superano il diametro o sono 0 si fermano)
+        # Qui impostiamo il numero di punti in base a quanti ne servono per la normativa o quanti ne vuoi visualizzare
+        n_punti_default = st.number_input("Punti da visualizzare (max 10)", value=4, min_value=1, max_value=10)
+        
         k_pit = st.number_input("K Pitot", value=0.69)
         
         st.write("---")
-        unit_dp = st.radio("Unità di misura per ΔP in tabella:", ["mmH2O", "Pa"], horizontal=True)
+        unit_dp = st.radio("Unità di misura ΔP:", ["mmH2O", "Pa"], horizontal=True)
         
         st.write("---")
-        st.subheader("Pressioni e Temperature")
         t_fumi = st.number_input("T. Fumi (°C)", value=259.0)
         p_atm = st.number_input("P. Atmosferica (hPa)", value=1013.25)
-        p_stat_pa = st.number_input("P. Statica nel camino (Pa)", value=-10.0)
-        
-        # Calcolo Pressione Assoluta (P.atm + P.stat/100)
+        p_stat_pa = st.number_input("P. Statica (Pa)", value=-10.0)
         p_ass_hpa = p_atm + (p_stat_pa / 100)
-        st.metric("Pressione Assoluta (P.ass)", f"{p_ass_hpa:.2f} hPa")
-        
-        st.write("---")
-        o2_mis = st.number_input("O2 misurata (%)", value=14.71)
-        h_in = st.number_input("Umidità (%)", value=4.68)
-        o2_rif = st.number_input("O2 riferimento (%)", value=8.0)
+        st.metric("Pressione Assoluta", f"{p_ass_hpa:.2f} hPa")
 
     with c2:
-        st.subheader(f"Mappatura ΔP ({unit_dp})")
+        st.subheader(f"Tabella Pressioni ({unit_dp})")
         
-        # --- LOGICA AFFONDAMENTI DA EXCEL (Coefficienti A3-A12) ---
-        # Coefficienti estratti dal tuo file per 10 punti potenziali
-        coeff_excel = [0.032, 0.105, 0.194, 0.323, 0.500, 0.500, 0.677, 0.806, 0.895, 0.968]
+        # --- GENERAZIONE AUTOMATICA RIGHE ---
+        # Creiamo la lista degli affondamenti usando i coefficienti del tuo Excel
+        affondamenti_reali = []
+        for i in range(int(n_punti_default)):
+            if i < len(coeff_excel):
+                # Calcolo esatto come nel tuo Excel: Diametro * Coefficiente
+                valor_aff = round(d_cam * coeff_excel[i], 3)
+                affondamenti_reali.append(valor_aff)
         
-        # Selezioniamo solo i coefficienti necessari in base a n_punti_asse
-        # Se n_punti è inferiore a 10, distribuiamo i coefficienti proporzionalmente
-        posizioni = []
-        for i in range(int(n_punti_asse)):
-            # Calcolo affondamento: Diametro * Coefficiente (convertito in metri)
-            # Nota: se n_punti < 10 usiamo una distribuzione standardizzata
-            val_coeff = coeff_excel[i] if n_punti_asse == 10 else (2*i + 1)/(2*n_punti_asse)
-            posizioni.append(round(val_coeff * d_cam, 3))
-
-        # Creazione Tabella (Colonne A, B, D)
+        # Il numero di righe della tabella si adatta ora automaticamente a n_punti_default
         df_mappa = pd.DataFrame({
-            "Punto": [f"P{i+1}" for i in range(int(n_punti_asse))],
-            "Affondamento (m)": posizioni,
-            f"ΔP Asse X ({unit_dp})": [2.7 if unit_dp == "mmH2O" else 26.6] * int(n_punti_asse),
-            f"ΔP Asse Y ({unit_dp})": [2.7 if unit_dp == "mmH2O" else 26.6] * int(n_punti_asse)
+            "Punto": [f"P{i+1}" for i in range(len(affondamenti_reali))],
+            "Affondamento (m)": affondamenti_reali,
+            f"ΔP Asse X ({unit_dp})": [0.0] * len(affondamenti_reali),
+            f"ΔP Asse Y ({unit_dp})": [0.0] * len(affondamenti_reali)
         })
 
-        edit_mappa = st.data_editor(df_mappa, hide_index=True, use_container_width=True)
+        # L'editor mostrerà SOLO il numero di righe calcolate sopra
+        edit_mappa = st.data_editor(
+            df_mappa, 
+            hide_index=True, 
+            use_container_width=True,
+            key=f"mappa_dinamica_{n_punti_default}_{d_cam}" # La chiave cambia se cambia il diametro o i punti per resettare correttamente
+        )
         
-        # --- CALCOLO VELOCITÀ E PORTATA ---
-        valori_dp = pd.concat([edit_mappa[f"ΔP Asse X ({unit_dp})"], edit_mappa[f"ΔP Asse Y ({unit_dp})"]])
+        # --- CALCOLI FISICI ---
+        col_x = f"ΔP Asse X ({unit_dp})"
+        col_y = f"ΔP Asse Y ({unit_dp})"
+        valori_dp = pd.concat([edit_mappa[col_x], edit_mappa[col_y]])
         dp_medio_in = valori_dp.mean()
 
+        # Conversione mmH2O -> Pa per la formula della velocità
         dp_pa = dp_medio_in * 9.80665 if unit_dp == "mmH2O" else dp_medio_in
         dp_visual_mmH2O = dp_medio_in if unit_dp == "mmH2O" else dp_medio_in / 9.80665
 
         rho_fumi = 1.293 * (p_ass_hpa / 1013.25) * (273.15 / (t_fumi + 273.15))
         v_fumi = k_pit * np.sqrt((2 * dp_pa) / rho_fumi) if rho_fumi > 0 else 0
         area = (np.pi * d_cam**2) / 4
+        
         q_aq = v_fumi * area * 3600
         q_un_s = (q_aq * (273.15/(t_fumi+273.15)) * (p_ass_hpa/1013.25)) * (1 - h_in/100)
         
         # Logica O2
+        o2_rif = st.session_state.get('o2_rif', 8.0) # Recupero se presente
         q_rif = q_un_s * ((20.9 - o2_mis) / (20.9 - o2_rif)) if o2_mis < 20.8 else q_un_s
 
         st.markdown("<div class='result-card'>", unsafe_allow_html=True)
-        st.write(f"**ΔP Medio:** {dp_visual_mmH2O:.3f} mmH2O | **P.ass:** {p_ass_hpa:.2f} hPa")
-        r1, r2 = st.columns(2)
-        r1.markdown(f"**Velocità:** {v_fumi:.2f} m/s<br>**Portata A.Q.:** {q_aq:.0f} Am³/h", unsafe_allow_html=True)
-        r2.markdown(f"**Portata N. Secca:** {q_un_s:.0f} Nm³/h<br><span style='color:green; font-size:18px;'><b>RIFERITA: {q_rif:.0f} Nm³/h</b></span>", unsafe_allow_html=True)
+        st.write(f"**Risultato medio:** {dp_visual_mmH2O:.3f} mmH2O")
+        res_c1, res_c2 = st.columns(2)
+        res_c1.write(f"**Velocità:** {v_fumi:.2f} m/s")
+        res_c2.write(f"**Portata Riferita:** {q_rif:.0f} Nm³/h")
         st.markdown("</div>", unsafe_allow_html=True)
-        
-        if st.button("💾 Salva Dinamica"):
-            st.session_state.dati_dinamica = {'v': v_fumi, 'q_rif': q_rif, 'p_ass': p_ass_hpa, 'tabella': edit_mappa.to_dict()}
-            st.success("Dati salvati!")
+
+        if st.button("💾 Salva Mappatura"):
+            st.session_state.dati_dinamica = {
+                'v': v_fumi, 
+                'q_rif': q_rif, 
+                'tabella': edit_mappa.to_dict()
+            }
+            st.success(f"Mappatura a {len(affondamenti_reali)} punti salvata!")
 # ==========================================
 # 3. CAMPIONAMENTI (CON VALIDAZIONE)
 # ==========================================
