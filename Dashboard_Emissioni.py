@@ -59,17 +59,20 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
 
 # ==========================================
-# 2. DINAMICA FUMI (TABELLA DOPPIO ASSE)
+# 2. DINAMICA FUMI (mmH2O / Pa & 2 ASSI)
 # ==========================================
 elif st.session_state.page == 'fumi':
-    st.header("📐 Dinamica dei Fumi (Mappatura su 2 Assi)")
+    st.header("📐 Dinamica dei Fumi e Mappatura Pressioni")
     c1, c2 = st.columns([1, 2])
     
     with c1:
         st.subheader("Parametri Condotto")
         d_cam = st.number_input("Diametro Camino (m)", value=1.4, format="%.3f")
-        # In un condotto circolare con 8 punti, avremo 4 punti per asse
-        n_punti_asse = st.number_input("Punti per ogni Asse", value=4, min_value=1)
+        n_punti_asse = st.number_input("Punti per ogni Asse (X, Y)", value=4, min_value=1)
+        
+        st.write("---")
+        # Scelta Unità di Misura per la Tabella
+        unit_dp = st.radio("Unità di misura per ΔP in tabella:", ["mmH2O", "Pa"], horizontal=True)
         
         st.write("---")
         t_fumi = st.number_input("T. Fumi (°C)", value=259.0)
@@ -84,58 +87,71 @@ elif st.session_state.page == 'fumi':
         o2_rif = st.number_input("O2 riferimento (%)", value=8.0)
 
     with c2:
-        st.subheader("Mappatura ΔP: Asse 1 e Asse 2")
+        st.subheader(f"Mappatura ΔP ({unit_dp})")
         
-        # --- LOGICA CALCOLO AFFONDAMENTI (Metodo UNI EN 15259) ---
-        # Calcoliamo le posizioni relative basate sul numero di punti per asse
-        # Esempio per 4 punti: 6.7%, 25%, 75%, 93.3% del diametro
-        posizioni_relative = []
-        for i in range(1, n_punti_asse + 1):
+        # Calcolo Affondamenti (UNI EN 15259)
+        posizioni = []
+        for i in range(1, int(n_punti_asse) + 1):
             pos = (2 * i - 1) / (2 * n_punti_asse)
-            posizioni_relative.append(round(pos * d_cam, 3))
+            posizioni.append(round(pos * d_cam, 3))
 
-        # Creazione DataFrame con 5 Colonne (A, B, C, D, E)
+        # Creazione DataFrame con Colonne A, B, D (come richiesto, C ed E eliminate)
+        # B = Asse 1, D = Asse 2
         df_mappa = pd.DataFrame({
-            "Punto": [f"P{i+1}" for i in range(n_punti_asse)],
-            "Affondamento (m)": posizioni_relative,
-            "Asse 1": ["Asse X"] * n_punti_asse,
-            "ΔP Asse 1 (Pa)": [26.6] * n_punti_asse,
-            "Asse 2": ["Asse Y"] * n_punti_asse,
-            "ΔP Asse 2 (Pa)": [26.6] * n_punti_asse
+            "Punto": [f"P{i+1}" for i in range(int(n_punti_asse))],
+            "Affondamento (m)": posizioni,
+            f"ΔP Asse X ({unit_dp})": [2.7 if unit_dp == "mmH2O" else 26.6] * int(n_punti_asse),
+            f"ΔP Asse Y ({unit_dp})": [2.7 if unit_dp == "mmH2O" else 26.6] * int(n_punti_asse)
         })
 
         edit_mappa = st.data_editor(df_mappa, hide_index=True, use_container_width=True)
         
-        # --- MOTORE DI CALCOLO ---
-        # Media di tutti i DeltaP inseriti nei due assi
-        tutti_dp = pd.concat([edit_mappa["ΔP Asse 1 (Pa)"], edit_mappa["ΔP Asse 2 (Pa)"]])
-        dp_med = tutti_dp.mean()
+        # --- LOGICA DI CONVERSIONE E CALCOLO ---
+        col_x = f"ΔP Asse X ({unit_dp})"
+        col_y = f"ΔP Asse Y ({unit_dp})"
         
+        # Uniamo i valori per la media
+        valori_dp = pd.concat([edit_mappa[col_x], edit_mappa[col_y]])
+        dp_medio_input = valori_dp.mean()
+
+        # Conversione in Pascal per le formule fisiche se l'input è mmH2O
+        if unit_dp == "mmH2O":
+            dp_pa = dp_medio_input * 9.80665
+            dp_visual_mmH2O = dp_medio_input
+        else:
+            dp_pa = dp_medio_input
+            dp_visual_mmH2O = dp_medio_input / 9.80665
+
+        # Calcolo Velocità e Portate
         rho_std = 1.293 
         rho_fumi = rho_std * (p_ass_hpa / 1013.25) * (273.15 / (t_fumi + 273.15))
-        v_fumi = k_pit * np.sqrt((2 * dp_med) / rho_fumi) if rho_fumi > 0 else 0
+        v_fumi = k_pit * np.sqrt((2 * dp_pa) / rho_fumi) if rho_fumi > 0 else 0
         area = (np.pi * d_cam**2) / 4
         
         q_aq = v_fumi * area * 3600
         q_un_s = (q_aq * (273.15/(t_fumi+273.15)) * (p_ass_hpa/1013.25)) * (1 - h_in/100)
         
-        # Logica O2
+        # Correzione O2
         f_corr = (20.9 - o2_mis) / (20.9 - o2_rif) if o2_mis < 20.8 else 1.0
         q_rif = q_un_s * f_corr
 
+        # --- RISULTATI ---
         st.markdown("<div class='result-card'>", unsafe_allow_html=True)
-        st.write(f"**ΔP Medio (totale):** {dp_med:.2f} Pa")
+        st.markdown(f"**ΔP Medio calcolato:** {dp_visual_mmH2O:.3f} mmH2O ({dp_pa:.2f} Pa)")
         r1, r2 = st.columns(2)
         r1.markdown(f"**Velocità:** {v_fumi:.2f} m/s<br>**Portata A.Q.:** {q_aq:.0f} Am³/h", unsafe_allow_html=True)
         r2.markdown(f"**Portata N. Secca:** {q_un_s:.0f} Nm³/h<br><span style='color:green; font-size:20px;'><b>RIFERITA: {q_rif:.0f} Nm³/h</b></span>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
         
-        if st.button("💾 Salva Dinamica Completa"):
+        if st.button("💾 Salva Dati Dinamica"):
             st.session_state.dati_dinamica = {
-                'v': v_fumi, 'q_rif': q_rif, 'p_ass': p_ass_hpa, 
-                'mappa': edit_mappa.to_dict(), 'd_cam': d_cam
+                'v': v_fumi, 
+                'q_rif': q_rif, 
+                'dp_mmH2O': dp_visual_mmH2O, # Salviamo il valore in mmH2O per il RdP
+                'unit_usata': unit_dp,
+                'tabella': edit_mappa.to_dict()
             }
-            st.success("Mappatura e calcoli archiviati.")
+            st.success("Dati archiviati con successo per il Rapporto di Prova.")
 # ==========================================
 # 3. CAMPIONAMENTI (CON VALIDAZIONE)
 # ==========================================
