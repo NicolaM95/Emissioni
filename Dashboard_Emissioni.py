@@ -74,27 +74,21 @@ elif st.session_state.page == 'fumi':
         d_cam = st.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
         
         # --- LOGICA SOGLIE RICHIESTE ---
-        # Sotto 35 cm
         if d_cam < 0.35:
             n_punti_fumi = 1
             coeffs = [0.500]
-        # Tra 35 (compreso) e 110 (escluso)
         elif 0.35 <= d_cam < 1.10:
             n_punti_fumi = 2
             coeffs = [0.146, 0.854]
-        # Tra 110 (compreso) e 160 (escluso)
         elif 1.10 <= d_cam < 1.60:
             n_punti_fumi = 4
             coeffs = [0.067, 0.250, 0.750, 0.933]
-        # Tra 160 (compreso) e 225 (escluso)
         elif 1.60 <= d_cam < 2.25:
             n_punti_fumi = 6
             coeffs = [0.044, 0.146, 0.296, 0.704, 0.854, 0.956]
-        # Tra 225 (compreso) e 250 (escluso)
         elif 2.25 <= d_cam < 2.50:
             n_punti_fumi = 8
             coeffs = [0.032, 0.105, 0.194, 0.323, 0.677, 0.806, 0.895, 0.968]
-        # Sopra 250 (compreso)
         else:
             n_punti_fumi = 10
             coeffs = [0.026, 0.082, 0.146, 0.226, 0.342, 0.658, 0.774, 0.854, 0.918, 0.974]
@@ -121,16 +115,18 @@ elif st.session_state.page == 'fumi':
 
     with c2:
         st.subheader(f"Mappatura ΔP ({unit_dp})")
-        affondamenti = [round(d_cam * c, 3) for c in coeffs]
+        
+        # --- CALCOLO AFFONDAMENTI IN CM PER LA TABELLA ---
+        # Moltiplico per 100 per passare da m a cm
+        affondamenti_cm = [round(d_cam * c * 100, 1) for c in coeffs]
         
         df_mappa = pd.DataFrame({
-            "Punto": [f"P{i+1}" for i in range(len(affondamenti))],
-            "Affondamento (m)": affondamenti,
-            f"ΔP Asse 1 ({unit_dp})": [0.0] * len(affondamenti),
-            f"ΔP Asse 2 ({unit_dp})": [0.0] * len(affondamenti)
+            "Punto": [f"P{i+1}" for i in range(len(affondamenti_cm))],
+            "Affondamento (cm)": affondamenti_cm,
+            f"ΔP Asse 1 ({unit_dp})": [0.0] * len(affondamenti_cm),
+            f"ΔP Asse 2 ({unit_dp})": [0.0] * len(affondamenti_cm)
         })
 
-        # Key dinamica con n_punti_fumi per forzare il refresh delle righe
         edit_mappa = st.data_editor(
             df_mappa, 
             hide_index=True, 
@@ -173,7 +169,7 @@ elif st.session_state.page == 'fumi':
                 'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis, 
                 'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi
             })
-            st.success(f"Dati salvati con griglia a {n_punti_fumi} punti!")
+            st.success(f"Dati salvati con successo!")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
