@@ -134,13 +134,13 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
  
 # ==========================================
-# 2. DINAMICA FUMI (LOGICA AVANZATA - ISO 16911)
+# 2. DINAMICA FUMI (LOGICA ISO 16911 - CALCOLO PUNTO PER PUNTO)
 # ==========================================
 elif st.session_state.page == 'fumi':
     st.markdown("<h2 class='section-title'>📐 Dinamica dei Fumi (Mappatura ISO 16911)</h2>", unsafe_allow_html=True)
     d = st.session_state.dati_dinamica
     
-    # Inizializziamo CO2 nel session state se non esiste
+    # Inizializziamo CO2 se non presente
     if 'co2' not in d: d['co2'] = 0.0 
 
     c1, c2 = st.columns([1.3, 2], gap="large")
@@ -152,7 +152,7 @@ elif st.session_state.page == 'fumi':
         d_cam = col_diam.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
         k_pit = col_k.number_input("K Pitot", value=d['k_pit'], format="%.2f")
         
-        # Logica Soglie ISO
+        # Logica Soglie ISO 16911
         if d_cam < 0.35: n_punti_fumi, coeffs = 1, [0.500]
         elif 0.35 <= d_cam < 1.10: n_punti_fumi, coeffs = 2, [0.146, 0.854]
         elif 1.10 <= d_cam < 1.60: n_punti_fumi, coeffs = 4, [0.067, 0.250, 0.750, 0.933]
@@ -160,7 +160,7 @@ elif st.session_state.page == 'fumi':
         elif 2.25 <= d_cam < 2.50: n_punti_fumi, coeffs = 8, [0.032, 0.105, 0.194, 0.323, 0.677, 0.806, 0.895, 0.968]
         else: n_punti_fumi, coeffs = 10, [0.026, 0.082, 0.146, 0.226, 0.342, 0.658, 0.774, 0.854, 0.918, 0.974]
             
-        st.info(f"Configurazione griglia: {n_punti_fumi} punti per asse")
+        st.info(f"Configurazione: {n_punti_fumi} punti per asse")
         
         # --- SEZIONE 2: TERMODINAMICA ---
         st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>🌡️ Termodinamica Fumi</h4>", unsafe_allow_html=True)
@@ -184,8 +184,8 @@ elif st.session_state.page == 'fumi':
     with c2:
         st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>📊 Mappatura Velocità (ΔP)</h4>", unsafe_allow_html=True)
         
-        # Selettore Unità sopra la tabella
-        unit_dp = st.radio("Seleziona Unità ΔP:", ["mmH2O", "Pa"], horizontal=True)
+        # Scelta unità sopra la tabella
+        unit_dp = st.radio("Unità ΔP in tabella:", ["mmH2O", "Pa"], horizontal=True)
         
         affondamenti_cm = [round(d_cam * c * 100, 1) for c in coeffs]
         df_mappa = pd.DataFrame({
@@ -199,33 +199,40 @@ elif st.session_state.page == 'fumi':
             df_mappa, 
             hide_index=True, 
             use_container_width=True, 
-            key=f"map_v3_{d_cam}_{unit_dp}"
+            key=f"map_iso_{d_cam}_{unit_dp}_{n_punti_fumi}"
         )
         
-        # --- MOTORE DI CALCOLO PROFESSIONALE AGGIORNATO ---
-        # 1. Media dei DeltaP (Pa)
-        dp_pa = pd.concat([edit_mappa.iloc[:,2], edit_mappa.iloc[:,3]]).mean()
-        if unit_dp == "mmH2O": 
-            dp_pa = dp_pa * 9.80665
+        # --- MOTORE DI CALCOLO PROFESSIONALE (PUNTO PER PUNTO) ---
         
-        # 2. Massa Molecolare Secca (MMs)
+        # 1. Preparazione dati DeltaP (uniamo i due assi)
+        lista_dp = pd.concat([edit_mappa.iloc[:,2], edit_mappa.iloc[:,3]])
+        
+        # 2. Calcolo Massa Molecolare e Densità Attuale
         m_dry = (o2_mis/100 * 31.998) + (co2_mis/100 * 44.01) + ((100-o2_mis-co2_mis)/100 * 28.013)
-        
-        # 3. Massa Molecolare Umida (MMu)
         bws = h_in / 100
         m_wet = m_dry * (1 - bws) + (18.015 * bws)
-        
-        # 4. Densità dei fumi alle condizioni di CAMINO (rho_f)
         t_ass_k = t_fumi + 273.15
-        rho_normal_wet = m_wet / 22.414
-        rho_fumi = rho_normal_wet * (p_ass_hpa / 1013.25) * (273.15 / t_ass_k)
         
-        # 5. Velocità e Portate
-        if rho_fumi > 0 and dp_pa >= 0:
-            v_fumi = k_pit * np.sqrt((2 * dp_pa) / rho_fumi)
-        else:
-            v_fumi = 0.0
+        # Densità reale in camino (kg/m3)
+        rho_fumi = (m_wet / 22.414) * (p_ass_hpa / 1013.25) * (273.15 / t_ass_k)
+        
+        # 3. Calcolo Velocità punto per punto (Logica corretta ISO)
+        velocita_punti = []
+        for dp in lista_dp:
+            dp_val = dp
+            if unit_dp == "mmH2O":
+                dp_val = dp * 9.80665 # Conversione in Pascal
+            
+            if dp_val > 0 and rho_fumi > 0:
+                v_punto = k_pit * np.sqrt((2 * dp_val) / rho_fumi)
+                velocita_punti.append(v_punto)
+            else:
+                velocita_punti.append(0.0)
+        
+        # 4. Media Finale delle Velocità
+        v_fumi = np.mean(velocita_punti) if len(velocita_punti) > 0 else 0.0
 
+        # 5. Calcolo Portate
         area = (np.pi * d_cam**2) / 4
         q_aq = v_fumi * area * 3600
         q_un_u = q_aq * (273.15 / t_ass_k) * (p_ass_hpa / 1013.25)
@@ -233,14 +240,14 @@ elif st.session_state.page == 'fumi':
         f_corr = (20.9 - o2_mis) / (20.9 - o2_rif) if o2_mis < 20.8 else 1.0
         q_rif = q_un_s * f_corr
 
-        # --- RISULTATI DASHBOARD ---
+        # --- DASHBOARD RISULTATI ---
         st.markdown(f"""
         <div class="result-card">
             <div style="display: flex; justify-content: space-between;">
                 <div>
                     <span class="label-custom">Velocità Media</span><br>
                     <span class="value-main">{v_fumi:.2f} m/s</span><br>
-                    <small style="color: #6c757d;">Densità Reale: {rho_fumi:.3f} kg/m³</small>
+                    <small style="color: #6c757d;">Densità: {rho_fumi:.3f} kg/m³</small>
                 </div>
                 <div style="text-align: right;">
                     <span class="label-custom">Massa Molecolare</span><br>
@@ -269,9 +276,9 @@ elif st.session_state.page == 'fumi':
             st.session_state.dati_dinamica.update({
                 'v': v_fumi, 'q_aq': q_aq, 'q_un_u': q_un_u, 'q_un_s': q_un_s, 'q_rif': q_rif,
                 'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis, 'co2': co2_mis,
-                'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi
+                'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi, 'rho': rho_fumi
             })
-            st.success("Analisi salvata con successo!")
+            st.success("Dati dinamica salvati con successo!")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
