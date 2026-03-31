@@ -134,7 +134,7 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
  
 # ==========================================
-# 2. DINAMICA FUMI (LOGICA ISO 16911 - CALCOLO PUNTO PER PUNTO)
+# 2. DINAMICA FUMI (LOGICA ISO 16911 - FILTRAGGIO PUNTI ATTIVI)
 # ==========================================
 elif st.session_state.page == 'fumi':
     st.markdown("<h2 class='section-title'>📐 Dinamica dei Fumi (Mappatura ISO 16911)</h2>", unsafe_allow_html=True)
@@ -184,7 +184,6 @@ elif st.session_state.page == 'fumi':
     with c2:
         st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>📊 Mappatura Velocità (ΔP)</h4>", unsafe_allow_html=True)
         
-        # Scelta unità sopra la tabella
         unit_dp = st.radio("Unità ΔP in tabella:", ["mmH2O", "Pa"], horizontal=True)
         
         affondamenti_cm = [round(d_cam * c * 100, 1) for c in coeffs]
@@ -202,35 +201,32 @@ elif st.session_state.page == 'fumi':
             key=f"map_iso_{d_cam}_{unit_dp}_{n_punti_fumi}"
         )
         
-        # --- MOTORE DI CALCOLO PROFESSIONALE (PUNTO PER PUNTO) ---
+        # --- MOTORE DI CALCOLO PROFESSIONALE (FILTRAGGIO E PUNTO PER PUNTO) ---
         
-        # 1. Preparazione dati DeltaP (uniamo i due assi)
-        lista_dp = pd.concat([edit_mappa.iloc[:,2], edit_mappa.iloc[:,3]])
+        # 1. Recupero e filtraggio dati validi (solo > 0)
+        tutti_i_dp = pd.concat([edit_mappa.iloc[:,2], edit_mappa.iloc[:,3]]).tolist()
+        lista_dp_validi = [v for v in tutti_i_dp if v > 0]
         
-        # 2. Calcolo Massa Molecolare e Densità Attuale
+        # 2. Calcolo Massa Molecolare e Densità Reale
         m_dry = (o2_mis/100 * 31.998) + (co2_mis/100 * 44.01) + ((100-o2_mis-co2_mis)/100 * 28.013)
         bws = h_in / 100
         m_wet = m_dry * (1 - bws) + (18.015 * bws)
         t_ass_k = t_fumi + 273.15
-        
-        # Densità reale in camino (kg/m3)
         rho_fumi = (m_wet / 22.414) * (p_ass_hpa / 1013.25) * (273.15 / t_ass_k)
         
-        # 3. Calcolo Velocità punto per punto (Logica corretta ISO)
+        # 3. Calcolo Velocità punto per punto su dati filtrati
         velocita_punti = []
-        for dp in lista_dp:
+        for dp in lista_dp_validi:
             dp_val = dp
             if unit_dp == "mmH2O":
-                dp_val = dp * 9.80665 # Conversione in Pascal
+                dp_val = dp * 9.80665 
             
-            if dp_val > 0 and rho_fumi > 0:
+            if rho_fumi > 0:
                 v_punto = k_pit * np.sqrt((2 * dp_val) / rho_fumi)
                 velocita_punti.append(v_punto)
-            else:
-                velocita_punti.append(0.0)
         
-        # 4. Media Finale delle Velocità
-        v_fumi = np.mean(velocita_punti) if len(velocita_punti) > 0 else 0.0
+        # 4. Media Finale delle Velocità (evita divisione per zero)
+        v_fumi = np.mean(velocita_punti) if velocita_punti else 0.0
 
         # 5. Calcolo Portate
         area = (np.pi * d_cam**2) / 4
@@ -247,7 +243,7 @@ elif st.session_state.page == 'fumi':
                 <div>
                     <span class="label-custom">Velocità Media</span><br>
                     <span class="value-main">{v_fumi:.2f} m/s</span><br>
-                    <small style="color: #6c757d;">Densità: {rho_fumi:.3f} kg/m³</small>
+                    <small style="color: #6c757d;">Densità: {rho_fumi:.3f} kg/m³ | Punti validi: {len(lista_dp_validi)}</small>
                 </div>
                 <div style="text-align: right;">
                     <span class="label-custom">Massa Molecolare</span><br>
@@ -278,7 +274,7 @@ elif st.session_state.page == 'fumi':
                 'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis, 'co2': co2_mis,
                 'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi, 'rho': rho_fumi
             })
-            st.success("Dati dinamica salvati con successo!")
+            st.success(f"Dati salvati ({len(lista_dp_validi)} punti analizzati)!")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
