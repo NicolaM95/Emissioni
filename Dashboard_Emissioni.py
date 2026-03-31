@@ -134,14 +134,14 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
  
 # ==========================================
-# 2. DINAMICA FUMI (LOGICA AVANZATA - DENSITÀ REALE)
+# 2. DINAMICA FUMI (LOGICA AVANZATA - ISO 16911)
 # ==========================================
 elif st.session_state.page == 'fumi':
     st.markdown("<h2 class='section-title'>📐 Dinamica dei Fumi (Mappatura ISO 16911)</h2>", unsafe_allow_html=True)
     d = st.session_state.dati_dinamica
     
     # Inizializziamo CO2 nel session state se non esiste
-    if 'co2' not in d: d['co2'] = 12.0 
+    if 'co2' not in d: d['co2'] = 0.0 
 
     c1, c2 = st.columns([1.3, 2], gap="large")
     
@@ -152,7 +152,7 @@ elif st.session_state.page == 'fumi':
         d_cam = col_diam.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
         k_pit = col_k.number_input("K Pitot", value=d['k_pit'], format="%.2f")
         
-        # Logica Soglie (Invariata)
+        # Logica Soglie ISO
         if d_cam < 0.35: n_punti_fumi, coeffs = 1, [0.500]
         elif 0.35 <= d_cam < 1.10: n_punti_fumi, coeffs = 2, [0.146, 0.854]
         elif 1.10 <= d_cam < 1.60: n_punti_fumi, coeffs = 4, [0.067, 0.250, 0.750, 0.933]
@@ -173,21 +173,19 @@ elif st.session_state.page == 'fumi':
         p_ass_hpa = p_atm + (p_stat_pa / 100)
         col_pass.metric("P. Assoluta (hPa)", f"{p_ass_hpa:.2f}")
         
-        # --- SEZIONE 3: COMPOSIZIONE GAS AGGIORNATA ---
-        st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>💨 Composizione Gas Reale</h4>", unsafe_allow_html=True)
+        # --- SEZIONE 3: COMPOSIZIONE GAS ---
+        st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>💨 Composizione Gas</h4>", unsafe_allow_html=True)
         c_h2o, c_o2, c_co2, c_o2r = st.columns(4)
         h_in = c_h2o.number_input("H₂O (%)", value=d['h_in'])
         o2_mis = c_o2.number_input("O₂ Mis. (%)", value=d['o2_mis'])
         co2_mis = c_co2.number_input("CO₂ (%)", value=d['co2'])
         o2_rif = c_o2r.number_input("O₂ Rif. (%)", value=d['o2_rif'])
-        
-        # Calcolo N2 per differenza
-        n2_mis = 100 - o2_mis - co2_mis
-        st.caption(f"Azoto (N₂) calcolato: {n2_mis:.2f}%")
 
     with c2:
         st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>📊 Mappatura Velocità (ΔP)</h4>", unsafe_allow_html=True)
-        unit_dp = st.radio("Unità ΔP:", ["mmH2O", "Pa"], horizontal=True)
+        
+        # Selettore Unità sopra la tabella
+        unit_dp = st.radio("Seleziona Unità ΔP:", ["mmH2O", "Pa"], horizontal=True)
         
         affondamenti_cm = [round(d_cam * c * 100, 1) for c in coeffs]
         df_mappa = pd.DataFrame({
@@ -197,54 +195,62 @@ elif st.session_state.page == 'fumi':
             f"ΔP Asse 2 ({unit_dp})": [0.0] * len(affondamenti_cm)
         })
 
-        edit_mappa = st.data_editor(df_mappa, hide_index=True, use_container_width=True, key=f"map_v3_{d_cam}_{unit_dp}")
+        edit_mappa = st.data_editor(
+            df_mappa, 
+            hide_index=True, 
+            use_container_width=True, 
+            key=f"map_v3_{d_cam}_{unit_dp}"
+        )
         
-        # --- MOTORE DI CALCOLO SCIENTIFICO ---
+        # --- MOTORE DI CALCOLO PROFESSIONALE AGGIORNATO ---
+        # 1. Media dei DeltaP (Pa)
         dp_pa = pd.concat([edit_mappa.iloc[:,2], edit_mappa.iloc[:,3]]).mean()
-        if unit_dp == "mmH2O": dp_pa *= 9.80665
+        if unit_dp == "mmH2O": 
+            dp_pa = dp_pa * 9.80665
         
-        # 1. Massa Molecolare Secca (M_dry)
-        # O2=32, CO2=44, N2=28.01
-        m_dry = (o2_mis/100 * 32.00) + (co2_mis/100 * 44.01) + (n2_mis/100 * 28.01)
+        # 2. Massa Molecolare Secca (MMs)
+        m_dry = (o2_mis/100 * 31.998) + (co2_mis/100 * 44.01) + ((100-o2_mis-co2_mis)/100 * 28.013)
         
-        # 2. Massa Molecolare Umida (M_wet)
-        # H2O=18.02
+        # 3. Massa Molecolare Umida (MMu)
         bws = h_in / 100
-        m_wet = m_dry * (1 - bws) + (18.02 * bws)
+        m_wet = m_dry * (1 - bws) + (18.015 * bws)
         
-        # 3. Densità in condizioni attuali (rho_actual) usando legge gas perfetti
-        # rho = (P * M) / (R * T) -> R=8.314 J/(mol*K) o costante specifica
-        # Semplificato: rho_an = M_wet / 22.414 (in condizioni normali 1013.25 e 273.15)
+        # 4. Densità dei fumi alle condizioni di CAMINO (rho_f)
+        t_ass_k = t_fumi + 273.15
         rho_normal_wet = m_wet / 22.414
-        rho_fumi = rho_normal_wet * (p_ass_hpa / 1013.25) * (273.15 / (t_fumi + 273.15))
+        rho_fumi = rho_normal_wet * (p_ass_hpa / 1013.25) * (273.15 / t_ass_k)
         
-        # 4. Velocità e Portate
-        v_fumi = k_pit * np.sqrt((2 * dp_pa) / rho_fumi) if rho_fumi > 0 else 0
+        # 5. Velocità e Portate
+        if rho_fumi > 0 and dp_pa >= 0:
+            v_fumi = k_pit * np.sqrt((2 * dp_pa) / rho_fumi)
+        else:
+            v_fumi = 0.0
+
         area = (np.pi * d_cam**2) / 4
         q_aq = v_fumi * area * 3600
-        q_un_u = q_aq * (273.15 / (t_fumi + 273.15)) * (p_ass_hpa / 1013.25)
+        q_un_u = q_aq * (273.15 / t_ass_k) * (p_ass_hpa / 1013.25)
         q_un_s = q_un_u * (1 - bws)
         f_corr = (20.9 - o2_mis) / (20.9 - o2_rif) if o2_mis < 20.8 else 1.0
         q_rif = q_un_s * f_corr
 
-        # --- RISULTATI ---
+        # --- RISULTATI DASHBOARD ---
         st.markdown(f"""
         <div class="result-card">
             <div style="display: flex; justify-content: space-between;">
                 <div>
                     <span class="label-custom">Velocità Media</span><br>
                     <span class="value-main">{v_fumi:.2f} m/s</span><br>
-                    <small style="color: #6c757d;">Densità fumi: {rho_fumi:.3f} kg/m³</small>
+                    <small style="color: #6c757d;">Densità Reale: {rho_fumi:.3f} kg/m³</small>
                 </div>
                 <div style="text-align: right;">
-                    <span class="label-custom">Massa Molecolare Umida</span><br>
+                    <span class="label-custom">Massa Molecolare</span><br>
                     <span style="font-size: 1.1rem; font-weight: 600;">{m_wet:.2f} g/mol</span>
                 </div>
             </div>
             <div style="margin: 15px 0; border-top: 1px solid #eee;"></div>
             <div style="display: flex; justify-content: space-between;">
                 <div>
-                    <span class="label-custom">Portata Tal Quale</span><br>
+                    <span class="label-custom">Tal Quale</span><br>
                     <span style="color: #2c3e50; font-weight: 600;">{q_aq:.0f} Am³/h</span><br><br>
                     <span class="label-custom">Normale Umida</span><br>
                     <span style="color: #2c3e50; font-weight: 600;">{q_un_u:.0f} Nm³/h</span>
@@ -252,7 +258,7 @@ elif st.session_state.page == 'fumi':
                 <div style="text-align: right;">
                     <span class="label-custom">Normale Secca</span><br>
                     <span style="color: #2c3e50; font-weight: 600;">{q_un_s:.0f} Nm³/h</span><br><br>
-                    <span class="label-custom" style="color: #27ae60;">Portata Riferita (O2)</span><br>
+                    <span class="label-custom" style="color: #27ae60;">Portata Rif. (O2)</span><br>
                     <span class="value-highlight">{q_rif:.0f} Nm³/h</span>
                 </div>
             </div>
@@ -261,10 +267,11 @@ elif st.session_state.page == 'fumi':
 
         if st.button("💾 Salva Dati Dinamica", use_container_width=True):
             st.session_state.dati_dinamica.update({
-                'v': v_fumi, 'q_rif': q_rif, 'co2': co2_mis, 'm_wet': m_wet, 'rho': rho_fumi,
-                'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis
+                'v': v_fumi, 'q_aq': q_aq, 'q_un_u': q_un_u, 'q_un_s': q_un_s, 'q_rif': q_rif,
+                'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis, 'co2': co2_mis,
+                'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi
             })
-            st.success("Dati calcolati con densità reale salvati!")
+            st.success("Analisi salvata con successo!")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
