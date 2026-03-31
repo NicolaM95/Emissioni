@@ -134,12 +134,13 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
  
 # ==========================================
-# 2. DINAMICA FUMI (LOGICA ISO 16911 - K-INTERNA/ESTERNA)
+# 2. DINAMICA FUMI (LOGICA ISO 16911 - K-INTERNA -> RADICE -> K-ESTERNA)
 # ==========================================
 elif st.session_state.page == 'fumi':
     st.markdown("<h2 class='section-title'>📐 Dinamica dei Fumi (Mappatura ISO 16911)</h2>", unsafe_allow_html=True)
     d = st.session_state.dati_dinamica
     
+    # Inizializzazione CO2 se assente
     if 'co2' not in d: d['co2'] = 0.0 
 
     c1, c2 = st.columns([1.3, 2], gap="large")
@@ -149,9 +150,11 @@ elif st.session_state.page == 'fumi':
         st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>📌 Caratteristiche Condotto</h4>", unsafe_allow_html=True)
         col_diam, col_k = st.columns(2)
         d_cam = col_diam.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
-        # Il tecnico inserisce la K di targa (es. 0.84)
-        k_pit = col_k.number_input("K Pitot (Interna)", value=d['k_pit'], format="%.3f")
         
+        # Inserimento K Interna (es. 0.84)
+        k_interna = col_k.number_input("K Pitot (Interna)", value=d['k_pit'], format="%.3f", help="Il software calcolerà la radice quadrata di questo valore per la formula finale.")
+        
+        # Logica Soglie ISO 16911 per numero punti
         if d_cam < 0.35: n_punti_fumi, coeffs = 1, [0.500]
         elif 0.35 <= d_cam < 1.10: n_punti_fumi, coeffs = 2, [0.146, 0.854]
         elif 1.10 <= d_cam < 1.60: n_punti_fumi, coeffs = 4, [0.067, 0.250, 0.750, 0.933]
@@ -167,10 +170,8 @@ elif st.session_state.page == 'fumi':
         t_fumi = col_t.number_input("T. Fumi (°C)", value=d['t_fumi'])
         p_atm = col_patm.number_input("P. Atmosferica (hPa)", value=d['p_atm'])
         
-        col_pstat, col_pass = st.columns(2)
-        p_stat_pa = col_pstat.number_input("P. Statica (Pa)", value=d['p_stat_pa'])
+        p_stat_pa = st.number_input("P. Statica (Pa)", value=d['p_stat_pa'])
         p_ass_hpa = p_atm + (p_stat_pa / 100)
-        col_pass.metric("P. Assoluta (hPa)", f"{p_ass_hpa:.2f}")
         
         # --- SEZIONE 3: COMPOSIZIONE GAS ---
         st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>💨 Composizione Gas</h4>", unsafe_allow_html=True)
@@ -184,48 +185,47 @@ elif st.session_state.page == 'fumi':
         st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>📊 Mappatura Velocità (ΔP)</h4>", unsafe_allow_html=True)
         unit_dp = st.radio("Unità ΔP in tabella:", ["mmH2O", "Pa"], horizontal=True)
         
-        affondamenti_cm = [round(d_cam * c * 100, 1) for c in coeffs]
         df_mappa = pd.DataFrame({
-            "Punto": [f"P{i+1}" for i in range(len(affondamenti_cm))],
-            "Affondamento (cm)": affondamenti_cm,
-            f"ΔP Asse 1 ({unit_dp})": [0.0] * len(affondamenti_cm),
-            f"ΔP Asse 2 ({unit_dp})": [0.0] * len(affondamenti_cm)
+            "Punto": [f"P{i+1}" for i in range(len(coeffs))],
+            "Affondamento (cm)": [round(d_cam * c * 100, 1) for c in coeffs],
+            f"ΔP Asse 1 ({unit_dp})": [0.0] * len(coeffs),
+            f"ΔP Asse 2 ({unit_dp})": [0.0] * len(coeffs)
         })
 
-        edit_mappa = st.data_editor(df_mappa, hide_index=True, use_container_width=True, key=f"map_v_final_{d_cam}_{unit_dp}")
+        edit_mappa = st.data_editor(df_mappa, hide_index=True, use_container_width=True, key=f"map_v_final_{unit_dp}")
         
-        # --- MOTORE DI CALCOLO PROFESSIONALE ---
+        # --- MOTORE DI CALCOLO UNI EN 16911-1 ---
         
-        # 1. Filtro punti attivi
+        # 1. Recupero dati e filtro zeri
         tutti_i_dp = pd.concat([edit_mappa.iloc[:,2], edit_mappa.iloc[:,3]]).tolist()
         lista_dp_validi = [v for v in tutti_i_dp if v > 0]
         
-        # 2. Massa Molecolare Umida
+        # 2. Calcolo Densità Reale (rho_f)
         m_dry = (o2_mis/100 * 31.998) + (co2_mis/100 * 44.01) + ((100-o2_mis-co2_mis)/100 * 28.013)
         bws = h_in / 100
         m_wet = m_dry * (1 - bws) + (18.015 * bws)
         
-        # 3. Densità Reale (rho_f)
         p_ass_pa = (p_atm * 100) + p_stat_pa 
         t_ass_k = t_fumi + 273.15
         rho_fumi = (p_ass_pa * m_wet) / (8314.472 * t_ass_k)
         
-        # 4. Calcolo Velocità (Logica K Interna -> Esterna)
-        # k_esterna = k_interna ^ 2
-        k_esterna = k_pit ** 2
+        # 3. TRASFORMAZIONE K (Radice Quadrata della K interna inserita)
+        # K_da_usare = sqrt(K_interna) per portarla fuori dalla radice nella formula standard
+        k_da_usare = np.sqrt(k_interna) if k_interna > 0 else 0
         
         velocita_punti = []
         for dp in lista_dp_validi:
+            # Conversione in Pascal se necessario
             dp_pa_val = dp * 9.80665 if unit_dp == "mmH2O" else dp
             
             if rho_fumi > 0:
-                # Formula con costante sotto radice (equivale a K_int fuori radice)
-                v_punto = np.sqrt((2 * dp_pa_val * k_esterna) / rho_fumi)
+                # Formula UNI EN 16911: v = K * sqrt( (2 * dp) / rho )
+                v_punto = k_da_usare * np.sqrt((2 * dp_pa_val) / rho_fumi)
                 velocita_punti.append(v_punto)
         
         v_fumi = np.mean(velocita_punti) if velocita_punti else 0.0
 
-        # 5. Portate
+        # 4. Calcolo Portate Finali
         area = (np.pi * d_cam**2) / 4
         q_aq = v_fumi * area * 3600
         q_un_u = q_aq * (273.15 / t_ass_k) * (p_ass_hpa / 1013.25)
@@ -233,45 +233,33 @@ elif st.session_state.page == 'fumi':
         f_corr = (20.9 - o2_mis) / (20.9 - o2_rif) if o2_mis < 20.8 else 1.0
         q_rif = q_un_s * f_corr
 
-        # --- RISULTATI ---
+        # --- VISUALIZZAZIONE RISULTATI ---
         st.markdown(f"""
         <div class="result-card">
-            <div style="display: flex; justify-content: space-between;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <span class="label-custom">Velocità Media</span><br>
                     <span class="value-main">{v_fumi:.2f} m/s</span><br>
-                    <small style="color: #6c757d;">Densità Reale: {rho_fumi:.3f} kg/m³</small>
+                    <small>Densità Reale: {rho_fumi:.3f} kg/m³ | K applicato: {k_da_usare:.4f}</small>
                 </div>
                 <div style="text-align: right;">
                     <span class="label-custom">Massa Molecolare</span><br>
-                    <span style="font-size: 1.1rem; font-weight: 600;">{m_wet:.2f} g/mol</span>
+                    <span style="font-weight: 600;">{m_wet:.2f} g/mol</span>
                 </div>
             </div>
             <div style="margin: 15px 0; border-top: 1px solid #eee;"></div>
             <div style="display: flex; justify-content: space-between;">
                 <div>
-                    <span class="label-custom">Tal Quale</span><br>
-                    <span style="color: #2c3e50; font-weight: 600;">{q_aq:.0f} Am³/h</span><br><br>
-                    <span class="label-custom">Normale Umida</span><br>
-                    <span style="color: #2c3e50; font-weight: 600;">{q_un_u:.0f} Nm³/h</span>
+                    <span class="label-custom">Normale Secca</span><br>
+                    <span style="color: #2c3e50; font-weight: 600;">{q_un_s:.0f} Nm³/h</span>
                 </div>
                 <div style="text-align: right;">
-                    <span class="label-custom">Normale Secca</span><br>
-                    <span style="color: #2c3e50; font-weight: 600;">{q_un_s:.0f} Nm³/h</span><br><br>
                     <span class="label-custom" style="color: #27ae60;">Portata Rif. (O2)</span><br>
                     <span class="value-highlight">{q_rif:.0f} Nm³/h</span>
                 </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
-
-        if st.button("💾 Salva Dati Dinamica", use_container_width=True):
-            st.session_state.dati_dinamica.update({
-                'v': v_fumi, 'q_aq': q_aq, 'q_un_u': q_un_u, 'q_un_s': q_un_s, 'q_rif': q_rif,
-                'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis, 'co2': co2_mis,
-                'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi, 'rho': rho_fumi
-            })
-            st.success(f"Analisi completata con {len(lista_dp_validi)} punti validi.")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
