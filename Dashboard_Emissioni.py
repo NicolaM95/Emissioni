@@ -140,27 +140,29 @@ elif st.session_state.page == 'fumi':
     st.markdown("<h2 class='section-title'>📐 Dinamica dei Fumi & Planning Isocinetico</h2>", unsafe_allow_html=True)
     d = st.session_state.dati_dinamica
     
-    # Inizializzazione parametri mancanti
+    # Inizializzazione parametri mancanti (incluso T_ambiente)
     if 'co2' not in d: d['co2'] = 0.0
+    if 't_amb' not in d: d['t_amb'] = 20.0
     if 'd_ugello_test' not in d: d['d_ugello_test'] = 6.0
 
-    # Layout a tre colonne per una gestione più pulita
     col_input, col_mappa, col_planning = st.columns([1, 1.2, 1], gap="medium")
     
     with col_input:
         st.markdown("#### ⚙️ Input Tecnici")
-        with st.expander("Geometria e Strumento", expanded=True):
+        with st.expander("Geometria e Pitot", expanded=True):
             d_cam = st.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
             k_interna = st.number_input("K Pitot (Targa)", value=d['k_pit'], format="%.3f")
-            # Logica soglie ISO 16911
+            
+            # Soglie ISO 16911
             if d_cam < 0.35: n_punti_fumi, coeffs = 1, [0.500]
             elif 0.35 <= d_cam < 1.10: n_punti_fumi, coeffs = 2, [0.146, 0.854]
             elif 1.10 <= d_cam < 1.60: n_punti_fumi, coeffs = 4, [0.067, 0.250, 0.750, 0.933]
             else: n_punti_fumi, coeffs = 6, [0.044, 0.146, 0.296, 0.704, 0.854, 0.956]
             st.caption(f"Configurazione: {n_punti_fumi} punti per asse.")
 
-        with st.expander("Parametri Gas", expanded=True):
+        with st.expander("Condizioni Gas e Ambiente", expanded=True):
             t_fumi = st.number_input("T. Fumi (°C)", value=d['t_fumi'])
+            t_amb = st.number_input("T. Ambiente / Contatore (°C)", value=d['t_amb'], help="Usata per stimare il flusso alla pompa")
             p_atm = st.number_input("P. Atm (hPa)", value=d['p_atm'])
             p_stat_pa = st.number_input("P. Statica (Pa)", value=d['p_stat_pa'])
             h_in = st.number_input("H₂O (%)", value=d['h_in'])
@@ -172,101 +174,115 @@ elif st.session_state.page == 'fumi':
         st.markdown("#### 📊 Mappatura ΔP")
         unit_dp = st.radio("Unità:", ["mmH2O", "Pa"], horizontal=True, label_visibility="collapsed")
         
+        # Creazione tabella con celle VUOTE (None) invece di 0.0
         df_mappa = pd.DataFrame({
             "Punto": [f"P{i+1}" for i in range(len(coeffs))],
             "Affond. (cm)": [round(d_cam * c * 100, 1) for c in coeffs],
-            f"ΔP Asse 1": [0.0] * len(coeffs),
-            f"ΔP Asse 2": [0.0] * len(coeffs)
+            f"ΔP Asse 1": [None] * len(coeffs),
+            f"ΔP Asse 2": [None] * len(coeffs)
         })
-        edit_mappa = st.data_editor(df_mappa, hide_index=True, use_container_width=True, key=f"map_v_{unit_dp}")
         
-        # --- CALCOLO MOTORE ---
-        tutti_i_dp = pd.concat([edit_mappa.iloc[:,2], edit_mappa.iloc[:,3]]).tolist()
+        edit_mappa = st.data_editor(
+            df_mappa, 
+            hide_index=True, 
+            use_container_width=True, 
+            key=f"map_v_clean_{unit_dp}"
+        )
+        
+        # --- LOGICA DI CALCOLO ---
+        p_ass_hpa = p_atm + (p_stat_pa / 100)
+        p_ass_pa = p_ass_hpa * 100
+        
+        # Estrazione e pulizia dati (ignora i None)
+        tutti_i_dp = pd.concat([edit_mappa.iloc[:,2], edit_mappa.iloc[:,3]]).dropna().tolist()
         lista_dp_validi = [v for v in tutti_i_dp if v > 0]
         
-        # Densità e Massa Molecolare
+        # Densità Reale (rho)
         m_wet = ((o2_mis/100 * 31.998) + (co2_mis/100 * 44.01) + ((100-o2_mis-co2_mis)/100 * 28.013)) * (1 - h_in/100) + (18.015 * h_in/100)
-        p_ass_pa = (p_atm * 100) + p_stat_pa
         rho_fumi = (p_ass_pa * m_wet) / (8314.472 * (t_fumi + 273.15))
-        k_da_usare = np.sqrt(k_interna) if k_interna > 0 else 0
         
+        # Velocità (K_norma = sqrt(K_interna))
+        k_da_usare = np.sqrt(k_interna) if k_interna > 0 else 0
         velocita_punti = [k_da_usare * np.sqrt((2 * (dp * 9.80665 if unit_dp == "mmH2O" else dp)) / rho_fumi) for dp in lista_dp_validi if rho_fumi > 0]
         v_fumi = np.mean(velocita_punti) if velocita_punti else 0.0
 
     with col_planning:
-        st.markdown("#### 🎯 Scelta Ugello")
-        st.info("Calcolo del flusso di aspirazione per mantenere l'isocinetismo.")
-        
-        d_u = st.number_input("Ø Ugello selezionato (mm)", value=d['d_ugello_test'], step=1.0, format="%.1f")
+        st.markdown("#### 🎯 Planning Ugello")
+        d_u = st.number_input("Ø Ugello (mm)", value=d['d_ugello_test'], step=0.5, format="%.1f")
         
         if v_fumi > 0:
-            # Calcolo Area Ugello
             area_u = (np.pi * (d_u / 1000)**2) / 4
-            # Flusso Isocinetico alle condizioni di camino (m3/h)
-            q_iso_camino_m3h = v_fumi * area_u * 3600
-            # Flusso Isocinetico in Litri al minuto (L/min) - Utile per settare la pompa
-            q_iso_lmin = (q_iso_camino_m3h * 1000) / 60
-            
-            # Stima flusso al contatore (assumendo T_meter = 20°C e P_meter = P_atm)
-            # Formula: Q_m = Q_f * (P_f / P_m) * (T_m / T_f)
-            t_m_stima = 20.0
-            q_meter_lmin = q_iso_lmin * (p_ass_pa / (p_atm * 100)) * ((t_m_stima + 273.15) / (t_fumi + 273.15))
+            q_iso_lmin = (v_fumi * area_u * 3600 * 1000) / 60
+            # Correzione Isocinetica al contatore basata su T_ambiente inserita
+            q_meter_lmin = q_iso_lmin * (p_ass_hpa / p_atm) * ((t_amb + 273.15) / (t_fumi + 273.15))
 
             st.markdown(f"""
-            <div style="background-color: #e8f4f8; padding: 15px; border-radius: 10px; border-left: 5px solid #3498db;">
-                <span class="label-custom">Target Isocinetico (Camino)</span><br>
-                <span style="font-size: 1.4rem; font-weight: bold; color: #2980b9;">{q_iso_lmin:.2f} L/min</span><br>
-                <span class="label-custom">Flusso Stimato al Contatore (20°C)</span><br>
-                <span style="font-size: 1.1rem; font-weight: 600; color: #16a085;">{q_meter_lmin:.2f} L/min</span>
+            <div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #2ecc71; margin-top:10px;">
+                <span style="font-size: 0.8rem; color: #555;">FLUSSO TARGET (CAMINO)</span><br>
+                <span style="font-size: 1.6rem; font-weight: 800; color: #27ae60;">{q_iso_lmin:.2f} <small>L/min</small></span><br>
+                <span style="font-size: 0.8rem; color: #555;">FLUSSO ALLA POMPA (@{t_amb}°C)</span><br>
+                <span style="font-size: 1.3rem; font-weight: 700; color: #2980b9;">{q_meter_lmin:.2f} <small>L/min</small></span>
             </div>
             """, unsafe_allow_html=True)
             
-            # Suggeritore rapido di ugelli
-            st.write("---")
-            st.caption("Tabella rapida (L/min teorici in camino):")
-            ugelli_test = [4, 5, 6, 7, 8, 10, 12]
+            # Tabella rapida ugelli
             quick_data = []
-            for ut in ugelli_test:
-                a_ut = (np.pi * (ut/1000)**2) / 4
-                q_ut = (v_fumi * a_ut * 3600 * 1000) / 60
+            for ut in [5, 6, 7, 8, 10]:
+                q_ut = (v_fumi * ((np.pi * (ut/1000)**2) / 4) * 3600 * 1000) / 60
                 quick_data.append({"Ø": f"{ut}mm", "L/min": round(q_ut, 2)})
             st.table(pd.DataFrame(quick_data))
         else:
-            st.warning("Inserire i ΔP per calcolare il flusso.")
+            st.info("Compilare la tabella ΔP")
 
-    # --- FOOTER RISULTATI FINALI ---
+    # ==========================================
+    # DASHBOARD RISULTATI (CARATTERI GRANDI)
+    # ==========================================
     area_cam = (np.pi * d_cam**2) / 4
     q_aq = v_fumi * area_cam * 3600
-    q_un_s = q_aq * (273.15 / (t_fumi + 273.15)) * (p_ass_pa / 101325.0) * (1 - h_in/100)
+    q_un_u = q_aq * (273.15 / (t_fumi + 273.15)) * (p_ass_hpa / 1013.25)
+    q_un_s = q_un_u * (1 - h_in/100)
     f_corr = (20.9 - o2_mis) / (20.9 - o2_rif) if o2_mis < 20.8 else 1.0
     q_rif = q_un_s * f_corr
 
-    st.markdown(f"""
-    <div class="result-card">
-        <div style="display: flex; justify-content: space-between;">
-            <div>
-                <span class="label-custom">Velocità Media</span><br>
-                <span class="value-main">{v_fumi:.2f} m/s</span>
+    st.markdown("---")
+    # Griglia Risultati Completa
+    r1, r2, r3 = st.columns(3)
+    
+    with r1:
+        st.markdown(f"""
+            <div class='result-card' style='text-align: center;'>
+                <span class='label-custom'>Velocità Media</span><br>
+                <span style='font-size: 2.5rem; font-weight: 900; color: #1a1c2e;'>{v_fumi:.2f} <small>m/s</small></span><br>
+                <span class='label-custom'>P. Assoluta: {p_ass_hpa:.1f} hPa</span>
             </div>
-            <div style="text-align: center;">
-                <span class="label-custom">Portata Normale Secca</span><br>
-                <span class="value-main">{q_un_s:.0f} Nm³/h</span>
-            </div>
-            <div style="text-align: right;">
-                <span class="label-custom">Portata di Riferimento (O₂)</span><br>
-                <span class="value-highlight">{q_rif:.0f} Nm³/h</span>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    if st.button("💾 Salva Dati e Configurazione Isocinetica", use_container_width=True):
+    with r2:
+        st.markdown(f"""
+            <div class='result-card' style='text-align: center; border-top: 4px solid #3498db;'>
+                <span class='label-custom'>Portata Tal Quale</span><br>
+                <span style='font-size: 1.8rem; font-weight: 700; color: #2c3e50;'>{q_aq:.0f} <small>Am³/h</small></span><br>
+                <span class='label-custom'>Normale Umida:</span><br>
+                <span style='font-size: 1.4rem; font-weight: 600; color: #34495e;'>{q_un_u:.0f} <small>Nm³/h</small></span>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with r3:
+        st.markdown(f"""
+            <div class='result-card' style='text-align: center; border-top: 4px solid #27ae60;'>
+                <span class='label-custom'>Portata Rif. O₂ ({o2_rif}%)</span><br>
+                <span style='font-size: 2.5rem; font-weight: 900; color: #27ae60;'>{q_rif:.0f} <small>Nm³/h</small></span><br>
+                <span class='label-custom'>Normale Secca: {q_un_s:.0f} Nm³/h</span>
+            </div>
+        """, unsafe_allow_html=True)
+
+    if st.button("💾 SALVA DATI DINAMICA E PIANIFICAZIONE", use_container_width=True, type="primary"):
         st.session_state.dati_dinamica.update({
-            'v': v_fumi, 'q_rif': q_rif, 'rho': rho_fumi, 'd_cam': d_cam,
-            'k_pit': k_interna, 't_fumi': t_fumi, 'h_in': h_in,
-            'd_ugello_test': d_u, 'q_iso_target': q_iso_lmin
+            'v': v_fumi, 'q_aq': q_aq, 'q_un_u': q_un_u, 'q_un_s': q_un_s, 'q_rif': q_rif,
+            'rho': rho_fumi, 'p_ass': p_ass_hpa, 't_amb': t_amb, 'd_ugello_test': d_u,
+            'k_pit': k_interna, 't_fumi': t_fumi, 'h_in': h_in, 'o2_mis': o2_mis, 'd_cam': d_cam
         })
-        st.success("Dati salvati! Ora puoi procedere al campionamento.")
+        st.success("Configurazione salvata correttamente!")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
