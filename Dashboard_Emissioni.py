@@ -134,59 +134,63 @@ if st.session_state.page == 'anagrafica':
             st.success("Dati Generali e Team salvati!")
  
 # ==========================================
-# 2. DINAMICA FUMI (LOGICA EXCEL - SOGLIE PRECISE)
+# 2. DINAMICA FUMI (LOGICA EXCEL - SOGLIE PRECISE E LAYOUT OTTIMIZZATO)
 # ==========================================
 elif st.session_state.page == 'fumi':
     st.markdown("<h2 class='section-title'>📐 Dinamica dei Fumi (Mappatura ISO 16911)</h2>", unsafe_allow_html=True)
     d = st.session_state.dati_dinamica
-    c1, c2 = st.columns([1, 2], gap="large")
+    c1, c2 = st.columns([1.2, 2], gap="large") # Leggermente allargata la c1 per i campi affiancati
     
     with c1:
-        st.subheader("Parametri Condotto")
-        d_cam = st.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
+        # --- SEZIONE 1: CARATTERISTICHE CONDOTTO ---
+        st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>📌 Caratteristiche Condotto</h4>", unsafe_allow_html=True)
+        col_diam, col_k = st.columns(2)
+        d_cam = col_diam.number_input("Diametro Camino (m)", value=d['d_cam'], format="%.3f")
+        k_pit = col_k.number_input("K Pitot", value=d['k_pit'], format="%.2f")
         
-        # --- LOGICA SOGLIE RICHIESTE ---
+        # Logica Soglie
         if d_cam < 0.35:
-            n_punti_fumi = 1
-            coeffs = [0.500]
+            n_punti_fumi, coeffs = 1, [0.500]
         elif 0.35 <= d_cam < 1.10:
-            n_punti_fumi = 2
-            coeffs = [0.146, 0.854]
+            n_punti_fumi, coeffs = 2, [0.146, 0.854]
         elif 1.10 <= d_cam < 1.60:
-            n_punti_fumi = 4
-            coeffs = [0.067, 0.250, 0.750, 0.933]
+            n_punti_fumi, coeffs = 4, [0.067, 0.250, 0.750, 0.933]
         elif 1.60 <= d_cam < 2.25:
-            n_punti_fumi = 6
-            coeffs = [0.044, 0.146, 0.296, 0.704, 0.854, 0.956]
+            n_punti_fumi, coeffs = 6, [0.044, 0.146, 0.296, 0.704, 0.854, 0.956]
         elif 2.25 <= d_cam < 2.50:
-            n_punti_fumi = 8
-            coeffs = [0.032, 0.105, 0.194, 0.323, 0.677, 0.806, 0.895, 0.968]
+            n_punti_fumi, coeffs = 8, [0.032, 0.105, 0.194, 0.323, 0.677, 0.806, 0.895, 0.968]
         else:
-            n_punti_fumi = 10
-            coeffs = [0.026, 0.082, 0.146, 0.226, 0.342, 0.658, 0.774, 0.854, 0.918, 0.974]
+            n_punti_fumi, coeffs = 10, [0.026, 0.082, 0.146, 0.226, 0.342, 0.658, 0.774, 0.854, 0.918, 0.974]
             
-        st.info(f"Configurazione: {n_punti_fumi} punti per asse")
+        st.info(f"Configurazione griglia: {n_punti_fumi} punti per asse")
+        st.write("") # Spazio vuoto
         
-        k_pit = st.number_input("K Pitot", value=d['k_pit'])
+        # --- SEZIONE 2: PRESSIONI E TEMPERATURE ---
+        st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>🌡️ Termodinamica Fumi</h4>", unsafe_allow_html=True)
+        col_t, col_patm = st.columns(2)
+        t_fumi = col_t.number_input("T. Fumi (°C)", value=d['t_fumi'])
+        p_atm = col_patm.number_input("P. Atmosferica (hPa)", value=d['p_atm'])
         
-        st.write("---")
-        unit_dp = st.radio("Unità ΔP in tabella:", ["mmH2O", "Pa"], horizontal=True)
-        
-        st.write("---")
-        st.subheader("Pressioni e Temperature")
-        t_fumi = st.number_input("T. Fumi (°C)", value=d['t_fumi'])
-        p_atm = st.number_input("P. Atmosferica (hPa)", value=d['p_atm'])
-        p_stat_pa = st.number_input("P. Statica (Pa)", value=d['p_stat_pa'])
-        
+        col_pstat, col_pass = st.columns(2)
+        p_stat_pa = col_pstat.number_input("P. Statica (Pa)", value=d['p_stat_pa'])
         p_ass_hpa = p_atm + (p_stat_pa / 100)
-        st.metric("Pressione Assoluta", f"{p_ass_hpa:.2f} hPa")
- 
-        h_in = st.number_input("Umidità (%)", value=d['h_in'])
-        o2_mis = st.number_input("O2 misurata (%)", value=d['o2_mis'])
-        o2_rif = st.number_input("O2 riferimento (%)", value=d['o2_rif'])
- 
+        # Visualizzazione metrica integrata visivamente bene
+        col_pass.metric("P. Assoluta (hPa)", f"{p_ass_hpa:.2f}")
+        
+        st.write("") # Spazio vuoto
+        
+        # --- SEZIONE 3: COMPOSIZIONE GAS ---
+        st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>💨 Composizione Gas</h4>", unsafe_allow_html=True)
+        col_h2o, col_o2m, col_o2r = st.columns(3)
+        h_in = col_h2o.number_input("H₂O (%)", value=d['h_in'])
+        o2_mis = col_o2m.number_input("O₂ Mis. (%)", value=d['o2_mis'])
+        o2_rif = col_o2r.number_input("O₂ Rif. (%)", value=d['o2_rif'])
+
     with c2:
-        st.subheader(f"Mappatura ΔP ({unit_dp})")
+        st.markdown("<h4 style='color: #2c3e50; font-weight: 600;'>📊 Mappatura Velocità (ΔP)</h4>", unsafe_allow_html=True)
+        
+        # --- SELETTORE UNITA' SPOSTATO SOPRA LA TABELLA ---
+        unit_dp = st.radio("Seleziona Unità di Misura per il ΔP:", ["mmH2O", "Pa"], horizontal=True)
         
         # --- CALCOLO AFFONDAMENTI IN CM PER LA TABELLA ---
         affondamenti_cm = [round(d_cam * c * 100, 1) for c in coeffs]
@@ -197,7 +201,7 @@ elif st.session_state.page == 'fumi':
             f"ΔP Asse 1 ({unit_dp})": [0.0] * len(affondamenti_cm),
             f"ΔP Asse 2 ({unit_dp})": [0.0] * len(affondamenti_cm)
         })
- 
+
         edit_mappa = st.data_editor(
             df_mappa, 
             hide_index=True, 
@@ -222,7 +226,7 @@ elif st.session_state.page == 'fumi':
         
         f_corr = (20.9 - o2_mis) / (20.9 - o2_rif) if o2_mis < 20.8 else 1.0
         q_rif = q_un_s * f_corr
- 
+
         # --- DESIGN RISULTATI DASHBOARD BIANCA ---
         st.markdown(f"""
         <div class="result-card">
@@ -253,15 +257,14 @@ elif st.session_state.page == 'fumi':
             </div>
         </div>
         """, unsafe_allow_html=True)
- 
-        if st.button("💾 Salva Dati Dinamica"):
+
+        if st.button("💾 Salva Dati Dinamica", use_container_width=True):
             st.session_state.dati_dinamica.update({
                 'v': v_fumi, 'q_aq': q_aq, 'q_un_u': q_un_u, 'q_un_s': q_un_s, 'q_rif': q_rif,
                 'h_in': h_in, 't_fumi': t_fumi, 'p_ass': p_ass_hpa, 'o2_mis': o2_mis, 
                 'd_cam': d_cam, 'k_pit': k_pit, 'n_punti': n_punti_fumi
             })
-            st.success(f"Dati salvati con successo!")
-
+            st.success(f"Dati archiviati con successo!")
 # ==========================================
 # 3. CAMPIONAMENTI
 # ==========================================
