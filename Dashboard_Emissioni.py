@@ -1,3 +1,11 @@
+import streamlit as st
+import streamlit.components.v1 as components
+
+# Configura la pagina per usare tutto lo spazio disponibile
+st.set_page_config(layout="wide", page_title="Emissioni Pro v6")
+
+# Inserisci TUTTO il tuo codice HTML/JS/CSS tra le triple virgolette
+html_code = """
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -220,7 +228,6 @@
 </head>
 <body>
 
-<!-- ═══ SIDEBAR ═══ -->
 <nav id="sidebar">
   <div class="sidebar-logo">
     <div class="logo-tag">Tecnico Emissioni</div>
@@ -256,7 +263,6 @@
   </div>
 </nav>
 
-<!-- ═══ MAIN ═══ -->
 <div id="main">
   <div id="topbar">
     <div class="topbar-breadcrumb">
@@ -274,9 +280,6 @@
 
   <div id="content">
 
-    <!-- ══════════════════════════════════
-         HOME
-    ══════════════════════════════════ -->
     <div id="page-home" class="page">
       <div class="home-header">
         <div class="greeting">BENVENUTO</div>
@@ -304,22 +307,17 @@
         </div>
       </div>
 
-      <!-- Sessioni salvate -->
       <div style="margin-top:28px;">
         <div class="panel-title" style="margin-bottom:12px;">Sessioni Salvate</div>
         <div id="sessions-list" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;"></div>
       </div>
     </div>
 
-    <!-- ══════════════════════════════════
-         DINAMICA FUMI
-    ══════════════════════════════════ -->
     <div id="page-fumi" class="page" style="display:none;">
       <div class="page-title">Dinamica Fumi & Portate</div>
       <div class="page-subtitle">PITOT S · ISO 16911-1 · CALCOLO PORTATE NORMALI E RIFERITE</div>
 
       <div class="layout-cols layout-2col">
-        <!-- LEFT -->
         <div>
           <div class="param-panel">
             <div class="panel-title">Geometria & Pitot</div>
@@ -385,7 +383,6 @@
           </div>
         </div>
 
-        <!-- RIGHT -->
         <div class="right-col">
           <div class="dp-section">
             <div class="panel-title">Mappatura ΔP — Punti di Misura</div>
@@ -429,14 +426,10 @@
       </div>
     </div>
 
-    <!-- ══════════════════════════════════
-         CAMPIONAMENTO ISOCINÉTICO
-    ══════════════════════════════════ -->
     <div id="page-campionamento" class="page" style="display:none;">
       <div class="page-title">Campionamento Isocinético</div>
       <div class="page-subtitle">VERIFICA ISOCINETISMO · ISO 16911-1 SEC. 8 · DATI DA DINAMICA FUMI</div>
 
-      <!-- Status bar isocinetismo -->
       <div class="iso-status-bar ok" id="iso-status-bar">
         <span class="iso-big" id="iso-icon">✓</span>
         <div>
@@ -446,7 +439,6 @@
         <div style="margin-left:auto;font-size:20px;font-weight:800;" id="iso-pct-big">—</div>
       </div>
 
-      <!-- KPI row -->
       <div class="camp-kpi-row">
         <div class="camp-kpi">
           <div class="ck-label">% Isocinetismo</div>
@@ -471,7 +463,6 @@
       </div>
 
       <div class="layout-cols layout-2col">
-        <!-- LEFT: parametri campionamento -->
         <div>
           <div class="param-panel">
             <div class="panel-title">Parametri Campione</div>
@@ -509,7 +500,6 @@
           </div>
         </div>
 
-        <!-- RIGHT: tabella punti campionamento -->
         <div>
           <div class="param-panel">
             <div class="panel-title">Dati per Punto di Campionamento</div>
@@ -530,9 +520,6 @@
       </div>
     </div>
 
-    <!-- ══════════════════════════════════
-         REPORT
-    ══════════════════════════════════ -->
     <div id="page-report" class="page" style="display:none;">
       <div class="page-title">Report Tecnico</div>
       <div class="page-subtitle">GENERAZIONE RAPPORTO · ESPORTAZIONE DATI</div>
@@ -584,11 +571,7 @@
       </div>
     </div>
 
-  </div><!-- /content -->
-</div><!-- /main -->
-
-<!-- TOAST -->
-<div id="toast"></div>
+  </div></div><div id="toast"></div>
 
 <script>
 // ═══════════════════════════════════════════════════════════
@@ -1185,3 +1168,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
+"""
+
+# Questo comando permette a Streamlit di leggere e visualizzare correttamente il tuo HTML
+components.html(html_code, height=900, scrolling=True)
