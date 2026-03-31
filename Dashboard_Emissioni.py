@@ -237,40 +237,40 @@ elif st.session_state.page == 'fumi':
         # ==========================================
         # DASHBOARD RISULTATI COMPLETA
         # ==========================================
-        st.markdown(f"""
-        <div class="result-card" style="margin-top: 15px;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <div>
-                    <span class="label-custom">Velocità Media (UNI EN 16911)</span><br>
-                    <span class="value-main">{v_fumi:.2f} m/s</span><br>
-                    <small style="color: #6c757d;">Punti attivi: {len(lista_dp_validi)} | K applicato (radice): {k_da_usare:.4f}</small>
-                </div>
-                <div style="text-align: right;">
-                    <span class="label-custom">Dati Termodinamici</span><br>
-                    <span style="font-weight: 500;">P. Assoluta:</span> {p_ass_hpa:.2f} hPa<br>
-                    <span style="font-weight: 500;">Densità (ρ):</span> {rho_fumi:.3f} kg/m³<br>
-                    <span style="font-weight: 500;">Massa Mol.:</span> {m_wet:.2f} g/mol
-                </div>
-            </div>
-            
-            <div style="margin: 15px 0; border-top: 1px solid #e0e0e0;"></div>
-            
-            <div style="display: flex; justify-content: space-between;">
-                <div>
-                    <span class="label-custom">Tal Quale (Am³/h)</span><br>
-                    <span style="color: #2c3e50; font-size: 1.15rem; font-weight: 600;">{q_aq:.0f}</span><br><br>
-                    <span class="label-custom">Normale Umida (Nm³/h)</span><br>
-                    <span style="color: #2c3e50; font-size: 1.15rem; font-weight: 600;">{q_un_u:.0f}</span>
-                </div>
-                <div style="text-align: right;">
-                    <span class="label-custom">Normale Secca (Nm³/h)</span><br>
-                    <span style="color: #2c3e50; font-size: 1.15rem; font-weight: 600;">{q_un_s:.0f}</span><br><br>
-                    <span class="label-custom" style="color: #27ae60;">Portata Rif. O₂ (Nm³/h)</span><br>
-                    <span class="value-highlight">{q_rif:.0f}</span>
-                </div>
-            </div>
+        # Il codice HTML è allineato a sinistra per evitare che il Markdown lo legga come blocco di codice
+        html_dashboard = f"""
+<div class="result-card" style="margin-top: 15px;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <span class="label-custom">Velocità Media (UNI EN 16911)</span><br>
+            <span class="value-main">{v_fumi:.2f} m/s</span><br>
+            <small style="color: #6c757d;">Punti attivi: {len(lista_dp_validi)} | K applicato (radice): {k_da_usare:.4f}</small>
         </div>
-        """, unsafe_allow_html=True)
+        <div style="text-align: right;">
+            <span class="label-custom">Dati Termodinamici</span><br>
+            <span style="font-weight: 500;">P. Assoluta:</span> {p_ass_hpa:.2f} hPa<br>
+            <span style="font-weight: 500;">Densità (ρ):</span> {rho_fumi:.3f} kg/m³<br>
+            <span style="font-weight: 500;">Massa Mol.:</span> {m_wet:.2f} g/mol
+        </div>
+    </div>
+    <div style="margin: 15px 0; border-top: 1px solid #e0e0e0;"></div>
+    <div style="display: flex; justify-content: space-between;">
+        <div>
+            <span class="label-custom">Tal Quale (Am³/h)</span><br>
+            <span style="color: #2c3e50; font-size: 1.15rem; font-weight: 600;">{q_aq:.0f}</span><br><br>
+            <span class="label-custom">Normale Umida (Nm³/h)</span><br>
+            <span style="color: #2c3e50; font-size: 1.15rem; font-weight: 600;">{q_un_u:.0f}</span>
+        </div>
+        <div style="text-align: right;">
+            <span class="label-custom">Normale Secca (Nm³/h)</span><br>
+            <span style="color: #2c3e50; font-size: 1.15rem; font-weight: 600;">{q_un_s:.0f}</span><br><br>
+            <span class="label-custom" style="color: #27ae60;">Portata Rif. O₂ (Nm³/h)</span><br>
+            <span class="value-highlight">{q_rif:.0f}</span>
+        </div>
+    </div>
+</div>
+"""
+        st.markdown(html_dashboard, unsafe_allow_html=True)
 
         if st.button("💾 Salva Dati Dinamica", use_container_width=True):
             st.session_state.dati_dinamica.update({
